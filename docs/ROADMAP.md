@@ -2,7 +2,15 @@
 
 Committed follow-on campaigns (in order):
 
-1. **NVFP4 KV cache on the triton backend** — the capacity unlock toward true 1M in-flight tokens.
+0. **STS + SPS calibration for cap-accept scheduling** (tooling shipped in `benchmarks/`): the
+   confidence head is trained and present, but unusable until per-position temperatures are fitted
+   and a cost table is profiled. The only remaining pure-config lever on accept.
+
+1. **mxfp8 KV cache on the triton backend** (implemented, gates pending): ~1.94× KV pool. Note the
+   port keeps upstream's kernels byte-untouched and puts all quantized paths in a twin-kernel module
+   that is only imported when quantization is on.
+
+2. **NVFP4 KV cache on the triton backend** — the capacity unlock toward true 1M in-flight tokens.
    The pool/storage side exists (fa4 uses it); the gap is `q/k/v_descale` handling + fp4
    block-scale dequant in the triton extend/decode/verify kernels. Donor code identified:
    upstream PR #32333 (DSV4 fp4 triton dequant) + a fleet-internal MLA nvfp4-KV triton mod
