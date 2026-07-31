@@ -15,6 +15,9 @@ Hardware: 2× DGX Spark (GB10, 128 GB unified, ~273 GB/s each), one 200G CX7↔C
 
 ### Single-stream, temp 0, decode CUDA graphs on
 
+**V2 champion (current defaults): 68.2 tok/s @ accept 7.53, lossless, 427K-token pool at 512K declared context**
+(`CTX=524288 · MEMFRAC=0.87 · MAXREQ=16 · graph tiers 1–16 · page 1 · draft-ctx cap`). v1 numbers below for history.
+
 | Workload | tok/s | DSpark accept len (of 8) |
 |---|---|---|
 | Raw continuation (essay-like, `/generate`) | **64.6** | 7.31 |
@@ -26,13 +29,18 @@ Hardware: 2× DGX Spark (GB10, 128 GB unified, ~273 GB/s each), one 200G CX7↔C
 Chat-path numbers are lower than raw continuation because Inkling's reasoning tokens draft
 harder. Never quote a single tok/s without its task class.
 
-### Concurrency (256 new tokens/req, temp 0.7, `--max-running-requests 8`, graph tiers {1,2,4,8})
+### Concurrency (256 new tokens/req, temp 0.7)
 
-| Task | C1 | C4 aggregate | C8 aggregate | accept @C8 |
+V2 (`MAXREQ=16`, tiers 1–16, 0.87): | v1 (`MAXREQ=8`, tiers {1,2,4,8}, 0.85):
+
+| Task | C1 | C4 agg | C8 agg (v2) | C8 agg (v1) |
 |---|---|---|---|---|
-| list | 37.6 | 32.9 | **61.6** | 2.85 |
-| essay | 30.9 | 38.6 | **44.1** | 2.72 |
-| reading | 16.3 | **71.1** | 61.8 | 2.66 |
+| list | 26.5 | 44.9 | **64.8** | 61.6 |
+| essay | 23.1 | 36.2 | **51.7** | 44.1 |
+| reading | 23.0 | 54.7 | **67.8** | 61.8 |
+
+**Accept is temperature-dependent**: ~7.5 at temp 0 vs ~2.3-2.8 at temp 0.7 (sampling diversity
+fights the draft) — that's why C1 rows here are lower than the temp-0 single-stream numbers.
 
 Raw CSV: [`benchmarks/concurrency_results.csv`](benchmarks/concurrency_results.csv) ·
 harness: [`benchmarks/concurrency_bench.py`](benchmarks/concurrency_bench.py).

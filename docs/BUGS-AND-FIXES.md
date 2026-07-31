@@ -21,6 +21,9 @@ If your boot dies, find your symptom here.
 | 13 (diagnosed) | — | Root-cause class for wall 13 found during KV-quant scoping: the triton kernels silently cast `q.to(K_Buffer.dtype)` / `p.to(v.dtype)` — with a quantized KV dtype the QUERY gets crushed to fp8 too, producing the `!!!` garbage. See docs/KV-QUANT-TRITON-PLAN.md | Fix ships with the mxfp8-triton port (roadmap #1, in progress) |
 | 13 | Output becomes `!!!!!...` garbage with `--kv-cache-dtype fp8_e4m3` (accept looks HIGH — garbage drafts vs garbage targets accept trivially) | FP8 KV silently corrupts on this engine/arch (matches sglang #19603-class behavior on hybrids) | bf16 KV only. FP8 KV was the only path to 1M-token pools on 2 nodes — therefore 1M is out of reach; max self-consistent context ≈ 384K |
 
+| 14 | `RuntimeError: Tensor match failed ... causal_conv1d.cuh:183` at first request | `SGLANG_RAGGED_VERIFY_MODE=compact` reshapes verify metadata; Inkling's sconv JIT kernel has a fixed shape contract | leave the env UNSET for Inkling |
+| 15 | Accept drops to ~3.3 (from 7.5) with `SGLANG_RAGGED_VERIFY_MODE=static` | explicit static mode degrades DSpark verify vs the unset default | leave the env UNSET; also beware: forgetting `--page-size 1` reproduces a ~2.2-accept collapse silently (launcher now defaults PAGE=1) |
+
 ## Constraints discovered (not bugs — architecture facts)
 
 - **Inkling attention asserts `fa4|triton`** (`inkling_common/attn.py`). fa4 = sm_100 only ⇒ triton is
