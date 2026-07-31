@@ -26,6 +26,7 @@ docker cp "$REPO_DIR/patches/files/moe.py.sglang_srt_models_inkling_common"     
 docker cp "$REPO_DIR/patches/files/sconv.py.sglang_srt_models_inkling_common"       inkling-bake:$SGL/srt/models/inkling_common/sconv.py
 docker cp "$REPO_DIR/patches/files/triton_backend.py.sglang_srt_layers_attention"   inkling-bake:$SGL/srt/layers/attention/triton_backend.py
 docker cp "$REPO_DIR/patches/files/inkling_moe.py.kernels_ops_moe"                  inkling-bake:$SGL/kernels/ops/moe/inkling_moe.py
+docker cp "$REPO_DIR/patches/files/draft_worker_common.py.sglang_srt_speculative"    inkling-bake:$SGL/srt/speculative/draft_worker_common.py
 
 echo "== running NCCL upgrade + helion seed inside container"
 docker start -a inkling-bake

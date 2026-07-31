@@ -78,9 +78,14 @@ costs DSpark speed even on short prompts. Pick a profile; all are lossless (bf16
 
 | Profile | Launch | KV pool (tokens) | Essay 256tok @ temp0 | accept |
 |---|---|---|---|---|
-| **SPEED (default)** | `CTX=65536` | 674,816 | **64.6 tok/s** | 7.31 |
-| MAX-CONTEXT (self-consistent) | `CTX=393216` | ~410K (≥ ctx) | between | between |
-| MAX-DECLARED | `CTX=524288` | 310,606 (**effective in-flight cap**) | 26.8 tok/s | 2.59 |
+| SPEED | `CTX=65536` | 674,816 | **64.6 tok/s** | 7.31 |
+| **LONG-CTX (draft-cap fix, default-ready)** | `CTX=524288` | 310,606 (in-flight cap) | **65.2 tok/s** | 7.31 |
+
+> **Update**: the draft-context cap (baked patch #6, `INKLING_DRAFT_CTX_CAP=65536`) removed the
+> long-context speed penalty entirely — 512K declared now runs at full speed on prompts within
+> the draft's 64K adaptation. The earlier 26.8 tok/s row is preserved below for history:
+>
+> | pre-fix MAX-DECLARED | `CTX=524288` | 310,606 | 26.8 tok/s | 2.59 |
 
 - The pool is shared across `--max-running-requests 8`; at 512K declared, one ~300K stream or 8×~38K.
 - **True 1M is not reachable on 2× GB10**: bf16 pools cap out as above, and **FP8 KV
