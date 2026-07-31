@@ -8,7 +8,7 @@
 # decode CUDA graphs bs {1,2,4,8}, mem-fraction 0.85, 64K ctx, conv-commit fix ON.
 #
 # Site knobs (env): MASTER_IP IF HCA GID MODELS IMAGE SGLANG_PORT
-# Tuning knobs (env): ATTN MOE FP4GEMM MEMFRAC CTX SPEC GRAPHS BLOCK MAXREQ PAGE EXTRA_ARGS
+# Tuning knobs (env): ATTN MOE FP4GEMM MEMFRAC CTX SPEC GRAPHS GRAPH_BS RAGGED BLOCK MAXREQ PAGE EXTRA_ARGS
 set -euo pipefail
 RANK=${1:?rank 0|1}
 
@@ -41,7 +41,7 @@ if [ "$SPEC" = 1 ]; then
           --speculative-dspark-block-size "${BLOCK:-7}")
 fi
 if [ "$GRAPHS" = 1 ]; then
-  EXTRA+=(--cuda-graph-bs 1 2 4 8 --disable-piecewise-cuda-graph --disable-prefill-cuda-graph)
+  EXTRA+=(--cuda-graph-bs ${GRAPH_BS:-1 2 3 4 5 6 7 8 10 12 14 16} --disable-piecewise-cuda-graph --disable-prefill-cuda-graph)
 else
   EXTRA+=(--disable-cuda-graph --disable-prefill-cuda-graph)
 fi
@@ -51,6 +51,7 @@ exec docker run --name inkling-sglang --rm --gpus all --network host --ipc host 
  --shm-size 16g --device /dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 --ulimit stack=67108864 \
  -v "$MODELS":/models:ro \
  -e SGLANG_ENABLE_UNIFIED_RADIX_TREE=1 \
+ -e SGLANG_RAGGED_VERIFY_MODE="${RAGGED:-compact}" \
  -e NCCL_IB_HCA="$HCA" -e NCCL_IB_GID_INDEX="$GID" \
  -e NCCL_SOCKET_IFNAME="$IF" -e GLOO_SOCKET_IFNAME="$IF" -e TP_SOCKET_IFNAME="$IF" \
  -e NCCL_NET=IB -e NCCL_IB_DISABLE=0 -e NCCL_NET_PLUGIN=none \
@@ -73,7 +74,7 @@ exec docker run --name inkling-sglang --rm --gpus all --network host --ipc host 
   --fp4-gemm-backend "$FP4GEMM" --moe-runner-backend "$MOE" \
   --mamba-radix-cache-strategy extra_buffer \
   --mem-fraction-static "$MEMFRAC" --swa-full-tokens-ratio 0.1 --mamba-full-memory-ratio 0.1 \
-  --max-running-requests "${MAXREQ:-8}" \
+  --max-running-requests "${MAXREQ:-16}" \
   --chunked-prefill-size 8192 \
   --reasoning-parser inkling --tool-call-parser inkling \
   --skip-server-warmup --disable-flashinfer-autotune \

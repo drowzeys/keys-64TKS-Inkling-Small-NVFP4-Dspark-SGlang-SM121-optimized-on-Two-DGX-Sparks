@@ -1,3 +1,21 @@
+--- pristine/draft_worker_common.py.sglang_srt_speculative	2026-07-31 04:51:47.674922055 -0400
++++ patched/draft_worker_common.py.sglang_srt_speculative	2026-07-31 04:51:47.437025411 -0400
+@@ -94,7 +94,14 @@
+         prefill_attention_backend=None,
+         decode_attention_backend=None,
+         attention_backend=draft_backend,
+-        context_length=target_model_config.context_len,
++        # Cap the draft's context independently of the target's declared context:
++        # the DSpark draft is 64K-adapted and its accept collapses when its
++        # context_length is force-matched to a large target context
++        # (measured: accept 7.31 -> 2.59 at 512K on identical short prompts).
++        context_length=min(
++            target_model_config.context_len,
++            int(__import__("os").environ.get("INKLING_DRAFT_CTX_CAP", "65536")),
++        ),
+     )
+ 
+     saved_server_args = get_server_args()
 --- pristine/inkling_moe.py.kernels_ops_moe	2026-07-31 03:58:07.049444782 -0400
 +++ patched/inkling_moe.py.kernels_ops_moe	2026-07-31 03:58:05.845436379 -0400
 @@ -884,7 +884,7 @@
