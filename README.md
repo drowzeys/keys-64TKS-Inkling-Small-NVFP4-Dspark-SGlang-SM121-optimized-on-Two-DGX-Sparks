@@ -49,7 +49,7 @@ outperform that reference.
 | `scripts/inkling-sglang-launch.sh` | per-rank launcher; defaults = validated champion config |
 | `patches/files/` | the 5 net-patched SGLang files (byte-exact from the validated image) |
 | `patches/all-patches.diff` | the same as a reviewable 162-line unified diff |
-| `docs/BUGS-AND-FIXES.md` | all 12 walls with symptoms → root causes → fixes, incl. 2 upstream-worthy bugs |
+| `docs/BUGS-AND-FIXES.md` | all 13 walls with symptoms → root causes → fixes, incl. 2 upstream-worthy bugs |
 | `benchmarks/` | bench harness + raw results |
 
 ## The two bugs you'd lose days on (both fixed here)
