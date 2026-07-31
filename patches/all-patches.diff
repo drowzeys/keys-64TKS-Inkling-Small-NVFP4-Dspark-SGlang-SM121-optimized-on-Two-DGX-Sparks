@@ -1,0 +1,162 @@
+--- pristine/inkling_moe.py.kernels_ops_moe	2026-07-31 03:58:07.049444782 -0400
++++ patched/inkling_moe.py.kernels_ops_moe	2026-07-31 03:58:05.845436379 -0400
+@@ -884,7 +884,7 @@
+             "BLOCK_SIZE_K": 128,
+             "GROUP_SIZE_M": 8,
+             "num_warps": 4,
+-            "num_stages": 4,
++            "num_stages": 2,
+         }
+     else:
+         assert block_size_m == BLOCK_SIZE_M, f"{block_size_m=}"
+@@ -894,7 +894,7 @@
+             "BLOCK_SIZE_K": 64,
+             "GROUP_SIZE_M": 8,
+             "num_warps": 8,
+-            "num_stages": 3,
++            "num_stages": 2,
+         }
+     # Set grid_m to the max number of M blocks and skip padding-only blocks
+     # in the kernel based on expert_block_offs[-1]
+--- pristine/inkling.py.sglang_srt_models	2026-07-31 03:58:06.072437964 -0400
++++ patched/inkling.py.sglang_srt_models	2026-07-31 03:58:04.971430279 -0400
+@@ -1214,6 +1214,9 @@
+         attention-backend hook. The pool is passed in because this runs from the
+         spec worker after the forward context has exited.
+         """
++        import os
++        if os.environ.get("INKLING_NOOP_CONV_COMMIT", "0") == "1":
++            return
+         from sglang.kernels.ops.mamba.mamba_state_scatter_triton import (
+             scatter_mamba_states_after_mtp_verify,
+         )
+@@ -1222,6 +1225,62 @@
+         mamba_indices = pool.translate_mamba_indices(
+             pool.get_mamba_indices(req_pool_indices)
+         )
++        import os as _os
++        if _os.environ.get("INKLING_TORCH_CONV_COMMIT", "0") == "1":
++            # GB10/plain-path fix: the non-symm-mem saver
++            # (save_intermediate_conv_windows) writes DENSE positional windows
++            # inter[b, t] = [W-1, D]; the triton scatter assumes the deduped
++            # as_strided rolling layout and reads garbage. Commit in torch,
++            # matching the saver's layout exactly. SSM scatter left as-is.
++            caches = pool.get_speculative_mamba2_params_all_layers()
++            if not hasattr(self, "_convfix_logged"):
++                self._convfix_logged = True
++                try:
++                    print("[convfix] temporal", tuple(caches.temporal.shape),
++                          "inter_ssm", tuple(caches.intermediate_ssm.shape),
++                          "conv", [tuple(c.shape) for c in caches.conv],
++                          "inter_conv", [tuple(c.shape) for c in caches.intermediate_conv_window],
++                          "mamba_indices", tuple(mamba_indices.shape), flush=True)
++                except Exception as e:
++                    print("[convfix] shape-log failed:", e, flush=True)
++            from sglang.kernels.ops.mamba.mamba_state_scatter_triton import (
++                fused_mamba_state_scatter_with_mask,
++            )
++            if caches.temporal.numel() > 0:
++                fused_mamba_state_scatter_with_mask(
++                    caches.temporal, caches.intermediate_ssm,
++                    mamba_indices, last_correct_step_indices,
++                )
++                if mamba_track_indices is not None and mamba_steps_to_track is not None:
++                    fused_mamba_state_scatter_with_mask(
++                        caches.temporal, caches.intermediate_ssm,
++                        mamba_track_indices, mamba_steps_to_track,
++                    )
++            bs = last_correct_step_indices.shape[0]
++            rows = torch.arange(bs, device=last_correct_step_indices.device)
++            step = last_correct_step_indices.to(torch.long)
++            _bias = int(_os.environ.get("INKLING_COMMIT_STEP_BIAS", "0"))
++            if _bias:
++                _tmax = None
++                for _c in caches.intermediate_conv_window:
++                    _tmax = _c.shape[2] - 1
++                    break
++                step = (step + _bias).clamp(0, _tmax if _tmax is not None else step.max())
++            valid = step >= 0
++            dst_idx = mamba_indices.to(torch.long)
++            # Layouts (verified on GB10): conv [L, cache, W-1, D];
++            # intermediate [L, max_bs, T, W-1, D] written POSITIONALLY by
++            # save_intermediate_conv_windows (rows 0..bs).
++            for conv_states, inter in zip(caches.conv, caches.intermediate_conv_window):
++                src = inter[:, rows[valid], step[valid]]
++                conv_states[:, dst_idx[valid]] = src.to(conv_states.dtype)
++                if mamba_track_indices is not None and mamba_steps_to_track is not None:
++                    tstep = mamba_steps_to_track.to(torch.long)
++                    tvalid = tstep >= 0
++                    if bool(tvalid.any()):
++                        tsrc = inter[:, rows[tvalid], tstep[tvalid]]
++                        conv_states[:, mamba_track_indices.to(torch.long)[tvalid]] = tsrc.to(conv_states.dtype)
++            return
+         scatter_mamba_states_after_mtp_verify(
+             pool.get_speculative_mamba2_params_all_layers(),
+             mamba_indices,
+--- pristine/moe.py.sglang_srt_models_inkling_common	2026-07-31 03:58:06.296439527 -0400
++++ patched/moe.py.sglang_srt_models_inkling_common	2026-07-31 03:58:05.234651652 -0400
+@@ -918,10 +918,8 @@
+         # trtllm_routed runner (unquantized ckpts only — a quantized ckpt's excluded
+         # bf16 layers resolve to the triton runner, which needs standard topk).
+         # moe_tp_forward and MoE-LoRA also need standard topk (LoRA packs internally).
+-        self.gate.emit_packed_topk = not lora_compatible_layout_enabled() and (
+-            not isinstance(self.experts.quant_method, UnquantizedFusedMoEMethod)
+-            or bf16_routed_uses_stock_fused_moe(self.quant_config)
+-        )
++        # GB10/sm_121: trtllm_routed packer targets sm_100 cubins; cutlass/marlin runners need standard topk
++        self.gate.emit_packed_topk = False
+ 
+     def _forward_routed(
+         self,
+--- pristine/sconv.py.sglang_srt_models_inkling_common	2026-07-31 03:58:06.545441265 -0400
++++ patched/sconv.py.sglang_srt_models_inkling_common	2026-07-31 03:58:05.445433587 -0400
+@@ -652,6 +652,17 @@
+             precomputed = self._prepare_extend_sconv_metadata(
+                 forward_batch, cache_indices
+             )
++            # Save windows from the PRE-conv x: causal_conv1d writes through
++            # hidden_states' buffer (residual path), so saving afterwards
++            # records post-conv activations — the fused path preserves
++            # x_scratch for exactly this reason (see verify_fused_ar_finish).
++            self._save_intermediate_conv_windows(
++                forward_batch=forward_batch,
++                cache=cache,
++                sconv_cache=sconv_cache,
++                cache_indices=cache_indices,
++                hidden_states=hidden_states,
++            )
+             y = causal_conv1d(
+                 x=hidden_states,
+                 weight=weight,
+@@ -661,13 +672,6 @@
+                 is_decode=False,
+                 **precomputed,
+             )
+-            self._save_intermediate_conv_windows(
+-                forward_batch=forward_batch,
+-                cache=cache,
+-                sconv_cache=sconv_cache,
+-                cache_indices=cache_indices,
+-                hidden_states=hidden_states,
+-            )
+ 
+         elif forward_batch.forward_mode.is_extend(include_draft_extend_v2=True):
+             query_start_loc, has_initial_state = self._prepare_extend_common_metadata(
+--- pristine/triton_backend.py.sglang_srt_layers_attention	2026-07-31 03:58:06.801443052 -0400
++++ patched/triton_backend.py.sglang_srt_layers_attention	2026-07-31 03:58:05.640434948 -0400
+@@ -165,6 +165,15 @@
+             self.token_to_kv_pool_allocator, "translate_kv_loc", None
+         )
+         self.num_draft_tokens = model_runner.server_args.speculative_num_draft_tokens
++        # sgl-project/sglang#30555: the DSpark proposer emits gamma rows per seq
++        # on the DRAFT worker; the inherited server value is the target's gamma+1.
++        if (
++            self.num_draft_tokens
++            and getattr(model_runner, 'is_draft_worker', False)
++            and getattr(model_runner, 'spec_algorithm', None) is not None
++            and model_runner.spec_algorithm.is_dspark()
++        ):
++            self.num_draft_tokens -= 1
+         self.speculative_num_steps = model_runner.server_args.speculative_num_steps
+         self.topk = model_runner.server_args.speculative_eagle_topk or 0
+         # Split-KV verify is bit-equivalent only for a pure-causal chain (topk==1)

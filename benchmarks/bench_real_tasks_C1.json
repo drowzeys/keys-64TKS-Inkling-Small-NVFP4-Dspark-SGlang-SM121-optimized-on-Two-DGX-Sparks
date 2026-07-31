@@ -1,0 +1,64 @@
+{
+  "note": "Primary: list/essay/reading. Count is diagnostic only.",
+  "url": "http://10.100.10.1:30000",
+  "model": "inkling-small",
+  "primary_tasks": [
+    "list",
+    "essay",
+    "reading"
+  ],
+  "primary_c1_median_tps": {
+    "list": 41.21,
+    "essay": 22.06,
+    "reading": 24.5
+  },
+  "c1": {
+    "list": {
+      "samples_tps": [
+        40.87,
+        41.23,
+        41.2,
+        41.26
+      ],
+      "median_tps": 41.21,
+      "best_tps": 41.26,
+      "mean_completion_tokens": 256,
+      "accept_len_median": null,
+      "accept_pct_median": null,
+      "preview": "1. the 2. be 3. to 4. of 5. and 6. a ",
+      "role": "primary"
+    },
+    "essay": {
+      "samples_tps": [
+        21.68,
+        21.94,
+        22.2,
+        22.17
+      ],
+      "median_tps": 22.06,
+      "best_tps": 22.2,
+      "mean_completion_tokens": 320,
+      "accept_len_median": null,
+      "accept_pct_median": null,
+      "preview": "",
+      "role": "primary"
+    },
+    "reading": {
+      "samples_tps": [
+        26.24,
+        24.43,
+        24.03,
+        24.58
+      ],
+      "median_tps": 24.5,
+      "best_tps": 26.24,
+      "mean_completion_tokens": 256,
+      "accept_len_median": null,
+      "accept_pct_median": null,
+      "preview": "",
+      "role": "primary"
+    }
+  },
+  "cN": {},
+  "ts": 1785477606.594296
+}
