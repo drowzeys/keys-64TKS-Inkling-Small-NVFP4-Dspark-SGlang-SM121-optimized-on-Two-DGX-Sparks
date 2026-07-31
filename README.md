@@ -53,9 +53,10 @@ Aggregate throughput scales well to C8; per-stream rate falls as expected. These
 | `specs/001-oneshot-install/` | spec / plan / **tasks.md** — the gated one-shot install |
 | `scripts/bake-image.sh` | digest-pinned upstream image + all patches → `local/sglang-inkling:gb10` |
 | `scripts/inkling-sglang-launch.sh` | per-rank launcher; defaults = validated champion config |
-| `patches/files/` | the 5 net-patched SGLang files (byte-exact from the validated image) |
+| `patches/files/` | the 6 net-patched SGLang files (byte-exact from the validated image) |
 | `patches/all-patches.diff` | the same as a reviewable 162-line unified diff |
-| `docs/BUGS-AND-FIXES.md` | all 13 walls with symptoms → root causes → fixes, incl. 2 upstream-worthy bugs |
+| `docs/BUGS-AND-FIXES.md` | all 18 walls with symptoms → root causes → fixes, incl. 2 upstream-worthy bugs |
+| `docs/MEASUREMENT-PROTOCOL.md` | **read before benchmarking** — this stack is nondeterministic at temp 0 |
 | `benchmarks/` | bench harness + raw results |
 
 ## The two bugs you'd lose days on (both fixed here)
@@ -83,16 +84,14 @@ CUMEM/NVLS off, `/dev/infiniband` passed through.
 Declared context resizes the hybrid pools AND stretches the draft's rope scaling, so long-context
 costs DSpark speed even on short prompts. Pick a profile; all are lossless (bf16 KV, byte-exact gate passed):
 
-| Profile | Launch | KV pool (tokens) | Essay 256tok @ temp0 | accept |
-|---|---|---|---|---|
-| SPEED | `CTX=65536` | 674,816 | **64.6 tok/s** | 7.31 |
-| **LONG-CTX (draft-cap fix, default-ready)** | `CTX=524288` | 310,606 (in-flight cap) | **65.2 tok/s** | 7.31 |
+| Profile | Launch | KV pool (tokens) | note |
+|---|---|---|---|
+| **SPEED (default)** | `CTX=65536` | 674,816 | the measured champion; see the performance table above |
+| LONG-CTX | `CTX=524288` | 310,606 (in-flight cap) | with the draft-context cap, speed is comparable to 64K on prompts inside the draft's 64K adaptation |
 
-> **Update**: the draft-context cap (baked patch #6, `INKLING_DRAFT_CTX_CAP=65536`) removed the
-> long-context speed penalty entirely — 512K declared now runs at full speed on prompts within
-> the draft's 64K adaptation. The earlier 26.8 tok/s row is preserved below for history:
->
-> | pre-fix MAX-DECLARED | `CTX=524288` | 310,606 | 26.8 tok/s | 2.59 |
+Earlier revisions listed per-profile tok/s from single runs (64.6 / 65.2 / 26.8). Those were
+single draws from a wide distribution and have been removed; re-measure any profile you care
+about with `benchmarks/accept_probe.py`.
 
 - The pool is shared across `--max-running-requests 8`; at 512K declared, one ~300K stream or 8×~38K.
 - **True 1M is not reachable on 2× GB10**: bf16 pools cap out as above, and **FP8 KV

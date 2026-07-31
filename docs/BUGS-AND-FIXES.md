@@ -1,6 +1,9 @@
 # Every wall we hit on GB10 (sm_121a), with fixes
 
-Chronological debug ledger from the original bring-up (2026-07-31, ~14 boot cycles).
+Chronological debug ledger from the bring-up and optimization campaign (2026-07-31, ~30 boot cycles).
+
+**Before you trust any performance comparison in here or anywhere else, read
+[MEASUREMENT-PROTOCOL.md](MEASUREMENT-PROTOCOL.md) — wall 18 is the one that cost the most time.**
 If your boot dies, find your symptom here.
 
 | # | Symptom | Root cause | Fix (baked unless noted) |
@@ -43,8 +46,9 @@ If your boot dies, find your symptom here.
 ## Upstream-worthy findings
 
 1. **#30555 done right** — the fix belongs in the attention backend's draft-worker width, not the
-   draft ServerArgs (which now double-corrects graph capture). Our accept went 2.5 → 7.31 and
-   decode graphs unblocked with the single `-1` in `triton_backend.py`.
+   draft ServerArgs (which now double-corrects graph capture). It fixes OOB draft KV reads (which pin accept near 1.0) and unblocks decode graphs, via the single
+   `-1` in `triton_backend.py`. (Campaign-era accept figures quoted around this fix were single-run
+   measurements — see wall 18.)
 2. **DSpark conv-commit off-by-one** (wall #10) — reproducible on any hybrid-conv model running
    DSpark without symm-mem. Repro: temp-0 prompt, watch output degrade into prompt-replay
    exactly when accept_len > 1; disable commit (`INKLING_NOOP_CONV_COMMIT=1`) and the replay
