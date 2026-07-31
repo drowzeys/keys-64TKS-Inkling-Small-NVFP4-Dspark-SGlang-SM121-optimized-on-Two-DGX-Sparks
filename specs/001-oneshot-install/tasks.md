@@ -57,8 +57,9 @@ MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount> ./scripts/
 MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount> ./scripts/inkling-sglang-launch.sh 0
 ```
 
-Defaults already encode the champion config: marlin MoE · triton attention · page-size 1 ·
-DSpark block 7 · decode graphs {1,2,4,8} · mem-fraction 0.85 · 64K ctx · conv-commit fix ON.
+Defaults encode the measured champion: marlin MoE · triton attention **+ fp32 reduction** ·
+page-size 1 · DSpark block 7 · decode graphs · mem-fraction 0.85 · 64K ctx · conv-commit fix ·
+draft-context cap.
 Boot takes ~6-8 min (156 GB NFS weight load). Watch: `docker logs -f inkling-sglang`.
 
 **GATE T3**: log shows `Initialized DSpark draft runner ... gamma=7` AND
@@ -81,11 +82,14 @@ regression — do not proceed; diff your image against this repo's patches.
 ## T5 — Benchmark (optional but recommended)
 
 ```bash
-python3 benchmarks/concurrency_bench.py      # C1/C4/C8 across list/essay/reading
+python3 benchmarks/accept_probe.py "my-install" --reps 8   # 32 samples, mean +/- se
+python3 benchmarks/concurrency_bench.py                    # C1/C4/C8 aggregate throughput
 ```
 
-Compare against `benchmarks/concurrency_results.csv` and the README tables (±15% is normal;
-2× off means a wall — check accept_len in `/generate` meta_info first).
+**Read [`docs/MEASUREMENT-PROTOCOL.md`](../../docs/MEASUREMENT-PROTOCOL.md) before comparing
+anything.** This stack is nondeterministic at temp 0; single-run numbers vary 3-4x on identical
+config. Expect accept ~3.4 ± 0.2 and ~34 ± 2 tok/s mean on the champion. If you see a single run
+at 60+ or at 12, that is the same distribution, not a finding.
 
 ## T6 — Point your client at it
 

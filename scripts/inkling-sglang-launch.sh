@@ -3,9 +3,12 @@
 #
 # Usage:  ./inkling-sglang-launch.sh <rank 0|1>     (start rank 1 on the worker FIRST, then rank 0 on the head)
 #
-# DEFAULTS = the validated champion config (lossless, 64.6 tok/s raw single-stream,
-# accept_len 7.31): marlin MoE, triton attention, page-size 1, DSpark block 7,
-# decode CUDA graphs bs {1,2,4,8}, mem-fraction 0.85, 64K ctx, conv-commit fix ON.
+# DEFAULTS = the measured champion (see README; numbers are mean +/- se over 32 samples,
+# NOT single runs): marlin MoE, triton attention + fp32 reduction, page-size 1, DSpark block 7,
+# decode CUDA graphs, mem-fraction 0.85, 64K ctx, conv-commit fix ON, draft-context cap ON.
+#
+# Measure ANY change with benchmarks/accept_probe.py — this stack is nondeterministic at temp 0
+# and single-run comparisons are worthless (docs/MEASUREMENT-PROTOCOL.md).
 #
 # Site knobs (env): MASTER_IP IF HCA GID MODELS IMAGE SGLANG_PORT
 # Tuning knobs (env): ATTN MOE FP4GEMM MEMFRAC CTX SPEC GRAPHS GRAPH_BS RAGGED BLOCK MAXREQ PAGE EXTRA_ARGS
@@ -25,8 +28,8 @@ PORT=${SGLANG_PORT:-30000}
 ATTN=${ATTN:-triton}                    # Inkling asserts fa4|triton; fa4 is sm_100-only -> triton
 MOE=${MOE:-marlin}                      # ONLY numerically-correct NVFP4 MoE runner on sm_121
 FP4GEMM=${FP4GEMM:-flashinfer_trtllm}   # dense FP4 GEMMs are fine on sm_121
-MEMFRAC=${MEMFRAC:-0.87}
-CTX=${CTX:-524288}                       # draft is 64K-adapted; model itself goes to 1M
+MEMFRAC=${MEMFRAC:-0.85}      # 0.87 works but buys nothing measurable; 0.85 is the fleet-safe ceiling
+CTX=${CTX:-65536}          # 64K = measured champion; larger ctx shrinks the KV pool                       # draft is 64K-adapted; model itself goes to 1M
 SPEC=${SPEC:-1}
 GRAPHS=${GRAPHS:-1}
 PAGE=${PAGE:-1}                         # page 128 corrupts the triton verify path
@@ -71,6 +74,7 @@ exec docker run --name inkling-sglang --rm --gpus all --network host --ipc host 
   --context-length "$CTX" \
   --quantization modelopt_fp4 \
   --attention-backend "$ATTN" --page-size "$PAGE" \
+  --triton-attention-reduce-in-fp32 \
   --fp4-gemm-backend "$FP4GEMM" --moe-runner-backend "$MOE" \
   --mamba-radix-cache-strategy extra_buffer \
   --mem-fraction-static "$MEMFRAC" --swa-full-tokens-ratio 0.1 --mamba-full-memory-ratio 0.1 \
