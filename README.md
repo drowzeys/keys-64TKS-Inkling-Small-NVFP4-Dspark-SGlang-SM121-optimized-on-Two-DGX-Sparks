@@ -71,6 +71,23 @@ decode graphs {1,2,4,8}, prefill graphs off, piecewise off · `--mem-fraction-st
 64K ctx (model supports 1M; the draft is 64K-adapted) · NCCL ≥2.30 over RoCE, `NCCL_NET=IB`,
 CUMEM/NVLS off, `/dev/infiniband` passed through.
 
+## Serving profiles (context vs speed — measured)
+
+Declared context resizes the hybrid pools AND stretches the draft's rope scaling, so long-context
+costs DSpark speed even on short prompts. Pick a profile; all are lossless (bf16 KV, byte-exact gate passed):
+
+| Profile | Launch | KV pool (tokens) | Essay 256tok @ temp0 | accept |
+|---|---|---|---|---|
+| **SPEED (default)** | `CTX=65536` | 674,816 | **64.6 tok/s** | 7.31 |
+| MAX-CONTEXT (self-consistent) | `CTX=393216` | ~410K (≥ ctx) | between | between |
+| MAX-DECLARED | `CTX=524288` | 310,606 (**effective in-flight cap**) | 26.8 tok/s | 2.59 |
+
+- The pool is shared across `--max-running-requests 8`; at 512K declared, one ~300K stream or 8×~38K.
+- **True 1M is not reachable on 2× GB10**: bf16 pools cap out as above, and **FP8 KV
+  (`--kv-cache-dtype fp8_e4m3`) produces catastrophic garbage output on this stack** (`!!!!…`) —
+  documented as wall #13. Do not use it.
+- The DSpark draft is 64K-adapted: accept also fades with actual prompt depth past ~64K.
+
 ## Provenance
 
 Upstream image: `lmsysorg/sglang@sha256:fbea1a4e25b26660dbc2384a27ead8817e9b7670f257b5c3143e0450d14524d7`

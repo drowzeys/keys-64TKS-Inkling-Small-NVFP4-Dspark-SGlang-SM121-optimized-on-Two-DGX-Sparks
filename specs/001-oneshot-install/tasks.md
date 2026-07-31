@@ -90,5 +90,11 @@ Compare against `benchmarks/concurrency_results.csv` and the README tables (±15
 ## T6 — Point your client at it
 
 OpenAI-compatible: `http://<head>:30000/v1` · model `inkling-small` · reasoning + tool-call
-parsers active. Raise context with `CTX=262144` (KV pool supports ~670K tokens at 0.85), but
-expect DSpark accept to fade past 64K (draft is 64K-adapted; correctness unaffected).
+parsers active.
+
+Context profiles (see README table for measured numbers): `CTX=65536` = max speed (default);
+`CTX=393216` = max self-consistent context (pool >= ctx); `CTX=524288` = max declared
+(pool 310K is the real in-flight cap). NEVER use `--kv-cache-dtype fp8_e4m3` (wall #13:
+catastrophic silent corruption). Declared context stretches the draft's rope scaling —
+long-context profiles are slower even on short prompts. Re-run the T4 lossless gate after
+any CTX change.

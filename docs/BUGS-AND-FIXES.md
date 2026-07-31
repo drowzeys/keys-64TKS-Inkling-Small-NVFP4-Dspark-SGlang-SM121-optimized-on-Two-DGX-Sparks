@@ -18,6 +18,8 @@ If your boot dies, find your symptom here.
 | 11 | `Capture cuda graph failed: shape '[N, 7, -1]' invalid` | Draft decode-graph tier vs sampler gamma mismatch (see #9 note) | fixed by the same triton_backend `-1` (and NOT pinning ServerArgs) |
 | 12 | Page-size 128: verify-path corruption even with all fixes | fa4-oriented 128-token pages mis-drive the triton verify path | `--page-size 1` (champion). Page-128 + triton remains unfixed upstream territory |
 
+| 13 | Output becomes `!!!!!...` garbage with `--kv-cache-dtype fp8_e4m3` (accept looks HIGH — garbage drafts vs garbage targets accept trivially) | FP8 KV silently corrupts on this engine/arch (matches sglang #19603-class behavior on hybrids) | bf16 KV only. FP8 KV was the only path to 1M-token pools on 2 nodes — therefore 1M is out of reach; max self-consistent context ≈ 384K |
+
 ## Constraints discovered (not bugs — architecture facts)
 
 - **Inkling attention asserts `fa4|triton`** (`inkling_common/attn.py`). fa4 = sm_100 only ⇒ triton is
