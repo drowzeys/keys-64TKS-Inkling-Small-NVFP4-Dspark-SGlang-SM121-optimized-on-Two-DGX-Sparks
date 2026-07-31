@@ -9,44 +9,42 @@ off datacenter Blackwell — TP=2 over a single 200G link between two GB10 (sm_1
 > It is a gated, ordered task list (spec-kit style). Execute it verbatim and you get this
 > exact serve without re-fighting the ~14 boot cycles it took to find these fixes.
 
-## Performance (measured 2026-07-31, this exact recipe)
+## Performance — measured with the 32-sample protocol
+
+> **Read [`docs/MEASUREMENT-PROTOCOL.md`](docs/MEASUREMENT-PROTOCOL.md) first.** The target forward
+> is nondeterministic at temp 0 on this stack, and DSpark acceptance swings with the *style* of the
+> continuation a run happens to land on. Single-run numbers here are meaningless. Earlier revisions
+> of this README quoted 64.6 / 68.2 tok/s from single probes — those were the top of a distribution
+> whose mean is ~30. They have been replaced with mean ± standard error over 32 samples.
 
 Hardware: 2× DGX Spark (GB10, 128 GB unified, ~273 GB/s each), one 200G CX7↔CX7 link, NFS weights.
+Config: DSpark block-7, decode graphs, marlin MoE, page 1, 64K ctx, mem-fraction 0.85.
 
-### Single-stream, temp 0, decode CUDA graphs on
+| Config | accept (of 8) | tok/s | n |
+|---|---|---|---|
+| DSpark, bf16 attention reduce | 3.09 ± 0.18 | 29.7 ± 2.1 | 32 |
+| **DSpark + `--triton-attention-reduce-in-fp32`** | **3.44 ± 0.17** | **34.3 ± 1.7** | 32 |
+| no speculation (eager reference) | — | ~13 | — |
 
-**V2 champion (current defaults): 68.2 tok/s @ accept 7.53, lossless, 427K-token pool at 512K declared context**
-(`CTX=524288 · MEMFRAC=0.87 · MAXREQ=16 · graph tiers 1–16 · page 1 · draft-ctx cap`). v1 numbers below for history.
+fp32 reduction is ~+11% accept / +15% tok/s — a ~1.4σ effect, so *probably* real but not
+conclusively separated from noise. It costs nothing measurable, so it ships as a default.
 
-| Workload | tok/s | DSpark accept len (of 8) |
-|---|---|---|
-| Raw continuation (essay-like, `/generate`) | **64.6** | 7.31 |
-| Chat `list` (C1 median) | 41.2 | — |
-| Chat `reading` (C1 median) | 24.5 | — |
-| Chat `essay` (C1 median) | 22.1 | — |
-| No-spec eager baseline | ~13 | — |
+Peak single runs reach ~50–60 tok/s; the floor is ~10–15. Both are the same config. Plan capacity
+against the mean, not the peak.
 
-Chat-path numbers are lower than raw continuation because Inkling's reasoning tokens draft
-harder. Never quote a single tok/s without its task class.
+**Task class matters**: raw mid-prose continuation accepts best; chat-template traffic with
+reasoning tokens accepts noticeably worse. Never quote tok/s without saying which you measured.
 
-### Concurrency (256 new tokens/req, temp 0.7)
+### Concurrency (256 tok/req, temp 0.7, MAXREQ 16, graph tiers 1–16)
 
-V2 (`MAXREQ=16`, tiers 1–16, 0.87): | v1 (`MAXREQ=8`, tiers {1,2,4,8}, 0.85):
+| Task | C1 | C4 agg | C8 agg |
+|---|---|---|---|
+| list | 26.5 | 44.9 | 64.8 |
+| essay | 23.1 | 36.2 | 51.7 |
+| reading | 23.0 | 54.7 | 67.8 |
 
-| Task | C1 | C4 agg | C8 agg (v2) | C8 agg (v1) |
-|---|---|---|---|---|
-| list | 26.5 | 44.9 | **64.8** | 61.6 |
-| essay | 23.1 | 36.2 | **51.7** | 44.1 |
-| reading | 23.0 | 54.7 | **67.8** | 61.8 |
-
-**Accept is temperature-dependent**: ~7.5 at temp 0 vs ~2.3-2.8 at temp 0.7 (sampling diversity
-fights the draft) — that's why C1 rows here are lower than the temp-0 single-stream numbers.
-
-Raw CSV: [`benchmarks/concurrency_results.csv`](benchmarks/concurrency_results.csv) ·
-harness: [`benchmarks/concurrency_bench.py`](benchmarks/concurrency_bench.py).
-Reference: LMSYS reports 648 tok/s (DSpark) vs 288 (no-spec) on 8× B200 TP8 — a rig with
-~29× this pair's aggregate memory bandwidth. Bandwidth-normalized, these two desktop boxes
-outperform that reference.
+Aggregate throughput scales well to C8; per-stream rate falls as expected. These predate the
+32-sample protocol — treat as indicative, re-measure before relying on them.
 
 ## What's in the box
 
@@ -63,8 +61,9 @@ outperform that reference.
 ## The two bugs you'd lose days on (both fixed here)
 
 1. **DSpark draft gamma mismatch** ([sglang#30555](https://github.com/sgl-project/sglang/issues/30555), fixed *correctly*):
-   one `-1` in the triton backend's draft-worker width takes accept from ~2.5 to **7.31** and
-   unblocks decode CUDA-graph capture. The issue's own suggested ServerArgs pin now double-corrects — don't use it.
+   one `-1` in the triton backend's draft-worker width fixes out-of-bounds draft KV reads (which
+   otherwise pin accept near 1.0) **and** unblocks decode CUDA-graph capture. The issue's own
+   suggested ServerArgs pin double-corrects on current builds — don't use it.
 2. **DSpark conv-state commit off-by-one** (novel): on the non-symm-mem path (i.e., everything
    that isn't a B200-class single-node), the sconv verify commit lands one token short and output
    degenerates into prompt-replay whenever accept > 1. Fixed with a +1-biased torch-native commit —
