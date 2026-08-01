@@ -1,4 +1,7 @@
-# Inkling-Small-NVFP4 + DSpark on 2× DGX Spark — **1M context, quantized KV, lossless**
+# keys-1M-context · Inkling-Small-NVFP4 + DSpark + **NVFP4 KV** · SGLang · sm_121a · Two DGX Sparks
+
+**A full 1M-token context on two desktop DGX Sparks — with the first NVFP4 KV cache for
+Inkling-Small NVFP4 + DSpark.**
 
 Serve [thinkingmachines/Inkling-Small-NVFP4](https://huggingface.co/thinkingmachines/Inkling-Small-NVFP4)
 (276B total / 12B active MoE) with the [RadixArk DSpark speculator](https://huggingface.co/RadixArk/Inkling-Small-DSpark-Preview)
@@ -59,6 +62,79 @@ are numerically clean. Then confirm the pool exceeds your context:
 grep -aoE 'context_len=[0-9]+|max_total_num_tokens=[0-9]+' ~/inkling-serve.log | tail -2
 → context_len=1048576    max_total_num_tokens=1082627
 ```
+
+---
+
+## The exact recipe (what the launcher actually runs)
+
+If you prefer to run it by hand, or need to adapt it, this is the champion invocation verbatim.
+`scripts/nvfp4-kv-boot.sh` is exactly this with the site values as env vars.
+
+```bash
+docker run --name inkling-sglang --rm --gpus all --network host --ipc host \
+  --shm-size 16g --device /dev/infiniband --cap-add IPC_LOCK \
+  --ulimit memlock=-1 --ulimit stack=67108864 \
+  -v <STORE>/inkling:/models:ro \
+  -e SGLANG_ENABLE_UNIFIED_RADIX_TREE=1 \
+  -e INKLING_TORCH_CONV_COMMIT=1 -e INKLING_COMMIT_STEP_BIAS=1 \
+  -e NCCL_IB_HCA=<rdma-dev> -e NCCL_IB_GID_INDEX=3 \
+  -e NCCL_SOCKET_IFNAME=<link-nic> -e GLOO_SOCKET_IFNAME=<link-nic> -e TP_SOCKET_IFNAME=<link-nic> \
+  -e NCCL_NET=IB -e NCCL_IB_DISABLE=0 -e NCCL_NET_PLUGIN=none \
+  -e NCCL_CUMEM_ENABLE=0 -e NCCL_NVLS_ENABLE=0 -e NCCL_CROSS_NIC=0 \
+  -e NCCL_IGNORE_CPU_AFFINITY=1 -e NCCL_DEBUG=WARN \
+  -e TORCH_CUDA_ARCH_LIST=12.1a -e FLASHINFER_CUDA_ARCH_LIST=12.1a \
+  -e HF_HUB_OFFLINE=1 -e TRANSFORMERS_OFFLINE=1 \
+  -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
+  --entrypoint python3 local/sglang-inkling:gb10-kvquant \
+  -m sglang.launch_server \
+    --model-path /models/inkling-small-nvfp4 --trust-remote-code \
+    --served-model-name inkling-small \
+    --host 0.0.0.0 --port 30000 \
+    --tp-size 2 --nnodes 2 --node-rank <0|1> --dist-init-addr <rank0-link-ip>:25000 \
+    --context-length 1048576 \
+    --quantization modelopt_fp4 \
+    --kv-cache-dtype fp4_mx_block16 \
+    --attention-backend triton --triton-attention-reduce-in-fp32 \
+    --page-size 1 \
+    --fp4-gemm-backend flashinfer_trtllm \
+    --moe-runner-backend marlin \
+    --mamba-radix-cache-strategy extra_buffer \
+    --mem-fraction-static 0.85 \
+    --swa-full-tokens-ratio 0.1 --mamba-full-memory-ratio 0.1 \
+    --max-running-requests 16 \
+    --chunked-prefill-size 8192 \
+    --reasoning-parser inkling --tool-call-parser inkling \
+    --skip-server-warmup --disable-flashinfer-autotune \
+    --stream-interval 32 \
+    --speculative-algorithm DSPARK \
+    --speculative-draft-model-path /models/dspark-draft \
+    --speculative-draft-model-quantization unquant \
+    --speculative-dspark-block-size 7 \
+    --cuda-graph-bs 1 2 3 4 5 6 7 8 10 12 14 16 \
+    --disable-piecewise-cuda-graph --disable-prefill-cuda-graph
+```
+
+**Every non-obvious flag, and why it is not optional:**
+
+| Flag | Why |
+|---|---|
+| `--kv-cache-dtype fp4_mx_block16` | the triton-compatible fp4 recipe. `nvfp4` selects the flashinfer/trtllm packing this lane cannot read; `fp8_e4m3` produces garbage (wall 13) |
+| `--attention-backend triton` | Inkling asserts `fa4\|triton`, and fa4 is sm_100-only ⇒ triton is the only legal lane on GB10 |
+| `--triton-attention-reduce-in-fp32` | bf16 accumulation across KV splits perturbs logits → fewer draft matches. ~+11% accept |
+| `--moe-runner-backend marlin` | the only numerically-correct NVFP4 MoE runner on sm_121: cutlass **silently miscomputes**, trtllm hard-fails on sm_100-only cubins |
+| `--page-size 1` | page-128 (the fa4 layout) corrupts the triton verify path |
+| `--disable-prefill-cuda-graph` | the triton backend cannot replay `EXTEND` mode |
+| `--disable-piecewise-cuda-graph` | the sm_121 piecewise compiler hard-fails |
+| `--cuda-graph-bs 1 2 … 16` | an explicit list; `--cuda-graph-max-bs` does **not** filter and the default list OOMs the pool |
+| `--speculative-dspark-block-size 7` | measured optimum; 15 (the checkpoint's native block) is worse here |
+| `INKLING_TORCH_CONV_COMMIT=1` + `INKLING_COMMIT_STEP_BIAS=1` | the conv-state commit fix. Without them output degenerates into prompt-replay whenever accept > 1 |
+| `--device /dev/infiniband --cap-add IPC_LOCK` | without RDMA passthrough NCCL fails with a bare `invalid usage` |
+| `--mem-fraction-static 0.85` | 0.87 boots fine but buys nothing measurable |
+
+**Order matters**: start `--node-rank 1` (worker) first, then `--node-rank 0` (head). The head is the
+rendezvous point at `--dist-init-addr`. If you script this across nodes, put the environment in a
+**file on each node** rather than passing it through nested SSH — multi-flag `EXTRA_ARGS` gets split
+by the second shell and the worker silently never launches (you'll see `1/2 clients joined`).
 
 ---
 
