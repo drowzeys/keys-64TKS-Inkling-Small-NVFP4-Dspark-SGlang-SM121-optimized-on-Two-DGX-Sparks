@@ -26,6 +26,18 @@ Config: DSpark block-7, decode graphs, marlin MoE, page 1, 64K ctx, mem-fraction
 | **DSpark + `--triton-attention-reduce-in-fp32`** | **3.44 ± 0.17** | **34.3 ± 1.7** | 32 |
 | no speculation (eager reference) | — | ~13 | — |
 
+### ⚑ Your accept number is supposed to be ~3.4 — don't chase higher
+
+RadixArk's model card for this draft publishes **`acc_len` mean 3.348** across 9 datasets, measured
+at temp 0 with block size 7 — *exactly* this serving config. Per-task it ranges 2.70 (Arena-Hard) to
+4.79 (GSM8K). **Our measured 3.44 ± 0.17 is the published number**: the stack is performing to spec.
+
+This repo's history contains a long hunt for an "accept 7.31 regression". There was no regression —
+7.31 was a lucky single draw from a nondeterministic distribution (see
+[MEASUREMENT-PROTOCOL.md](docs/MEASUREMENT-PROTOCOL.md)). If you measure ~3.4, **you are done tuning
+the speculator**; the only lever beyond it is finetuning the draft
+([plan](docs/DRAFT-FINETUNE-PLAN.md), realistic ceiling ~4.2-4.6).
+
 fp32 reduction is ~+11% accept / +15% tok/s — a ~1.4σ effect, so *probably* real but not
 conclusively separated from noise. It costs nothing measurable, so it ships as a default.
 
