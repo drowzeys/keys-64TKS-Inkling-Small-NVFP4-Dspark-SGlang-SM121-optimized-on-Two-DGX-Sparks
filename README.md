@@ -1,171 +1,145 @@
-# keys-64TKS · Inkling-Small-NVFP4 + DSpark · SGLang · sm_121a · Two DGX Sparks
+# Inkling-Small-NVFP4 + DSpark on 2× DGX Spark — **1M context, quantized KV, lossless**
 
-**64 tok/s single-stream, lossless speculative decoding, on two desktop DGX Sparks.**
-The first known deployment of [thinkingmachines/Inkling-Small-NVFP4](https://huggingface.co/thinkingmachines/Inkling-Small-NVFP4)
+Serve [thinkingmachines/Inkling-Small-NVFP4](https://huggingface.co/thinkingmachines/Inkling-Small-NVFP4)
 (276B total / 12B active MoE) with the [RadixArk DSpark speculator](https://huggingface.co/RadixArk/Inkling-Small-DSpark-Preview)
-off datacenter Blackwell — TP=2 over a single 200G link between two GB10 (sm_121a) machines.
+across **two desktop DGX Sparks** (GB10 / sm_121a), at a **full 1,048,576-token context**.
 
-> **Agents: start at [`specs/001-oneshot-install/tasks.md`](specs/001-oneshot-install/tasks.md).**
-> It is a gated, ordered task list (spec-kit style). Execute it verbatim and you get this
-> exact serve without re-fighting the ~14 boot cycles it took to find these fixes.
+This is a field port. SGLang's triton backend — the only attention lane this model can use on
+consumer Blackwell — shipped with **no KV quantization at all**, and none of this had been run on
+GB10 before. Everything needed is here: patched files, bake script, launcher, benchmarks, and every
+wall we hit with its fix.
 
-## Performance — measured with the 32-sample protocol
+---
 
-> **Read [`docs/MEASUREMENT-PROTOCOL.md`](docs/MEASUREMENT-PROTOCOL.md) first.** The target forward
-> is nondeterministic at temp 0 on this stack, and DSpark acceptance swings with the *style* of the
-> continuation a run happens to land on. Single-run numbers here are meaningless. Earlier revisions
-> of this README quoted 64.6 / 68.2 tok/s from single probes — those were the top of a distribution
-> whose mean is ~30. They have been replaced with mean ± standard error over 32 samples.
+## Quick start — the champion stack
 
-Hardware: 2× DGX Spark (GB10, 128 GB unified, ~273 GB/s each), one 200G CX7↔CX7 link, NFS weights.
-Config: DSpark block-7, decode graphs, marlin MoE, page 1, 64K ctx, mem-fraction 0.85.
+**Prereqs**: 2× DGX Spark / GB10 (128 GB unified each, DGX OS, CUDA 13, docker + nvidia runtime); a
+direct 200G CX7↔CX7 link with IPs on both ends; `ls /dev/infiniband` non-empty on both nodes; ~165 GB
+of storage for weights, reachable at the **same path** on both nodes (NFS or local copies).
 
-| Config | accept (of 8) | tok/s | n |
-|---|---|---|---|
-| DSpark, bf16 attention reduce | 3.09 ± 0.18 | 29.7 ± 2.1 | 32 |
-| **DSpark + `--triton-attention-reduce-in-fp32`** | **3.44 ± 0.17** | **34.3 ± 1.7** | 32 |
-| no speculation (eager reference) | — | ~13 | — |
+```bash
+# 0) on the HEAD node (rank 0), with SSH access to the worker
+git clone https://github.com/drowzeys/keys-64TKS-Inkling-Small-NVFP4-Dspark-SGlang-SM121-optimized-on-Two-DGX-Sparks.git
+cd keys-64TKS-*
 
-### ⚑ Your accept number is supposed to be ~3.4 — don't chase higher
+# 1) weights — once, wherever the shared storage lives
+python3 -m venv ~/hfdl-venv && ~/hfdl-venv/bin/pip install -q huggingface_hub hf_transfer
+HF_HUB_ENABLE_HF_TRANSFER=1 ~/hfdl-venv/bin/hf download \
+  thinkingmachines/Inkling-Small-NVFP4  --local-dir <STORE>/inkling/inkling-small-nvfp4
+HF_HUB_ENABLE_HF_TRANSFER=1 ~/hfdl-venv/bin/hf download \
+  RadixArk/Inkling-Small-DSpark-Preview --local-dir <STORE>/inkling/dspark-draft
 
-RadixArk's model card for this draft publishes **`acc_len` mean 3.348** across 9 datasets, measured
-at temp 0 with block size 7 — *exactly* this serving config. Per-task it ranges 2.70 (Arena-Hard) to
-4.79 (GSM8K). **Our measured 3.44 ± 0.17 is the published number**: the stack is performing to spec.
+# 2) build the image — ON EACH NODE (digest-pinned upstream + every patch)
+KVQUANT=1 ./scripts/bake-image.sh
 
-This repo's history contains a long hunt for an "accept 7.31 regression". There was no regression —
-7.31 was a lucky single draw from a nondeterministic distribution (see
-[MEASUREMENT-PROTOCOL.md](docs/MEASUREMENT-PROTOCOL.md)). If you measure ~3.4, **you are done tuning
-the speculator**; the only lever beyond it is finetuning the draft
-([plan](docs/DRAFT-FINETUNE-PLAN.md), realistic ceiling ~4.2-4.6).
+# 3) launch — WORKER FIRST, then head. Defaults are the champion config.
+#    worker:
+MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./scripts/nvfp4-kv-boot.sh 1
+#    head:
+MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./scripts/nvfp4-kv-boot.sh 0
+```
 
-fp32 reduction is ~+11% accept / +15% tok/s — a ~1.4σ effect, so *probably* real but not
-conclusively separated from noise. It costs nothing measurable, so it ships as a default.
+`IF` is the NIC carrying the inter-node link, `HCA` its RDMA device (`ibv_devices`). Boot takes
+~8 min (156 GB weight load + first-run JIT); follow it with `docker logs -f inkling-sglang`.
+OpenAI-compatible endpoint on port **30000**.
 
-Peak single runs reach ~50–60 tok/s; the floor is ~10–15. Both are the same config. Plan capacity
-against the mean, not the peak.
+### Verify (30 seconds)
 
-**Task class matters**: raw mid-prose continuation accepts best; chat-template traffic with
-reasoning tokens accepts noticeably worse. Never quote tok/s without saying which you measured.
+```bash
+curl -s localhost:30000/v1/completions -H 'Content-Type: application/json' \
+  -d '{"model":"inkling-small","prompt":"The capital of France is","max_tokens":12,"temperature":0}'
+```
 
-### Concurrency (256 tok/req, temp 0.7, MAXREQ 16, graph tiers 1–16)
+Expect byte-for-byte: ` Paris. The capital of Germany is Berlin. The capital of`
 
-| Task | C1 | C4 agg | C8 agg |
-|---|---|---|---|
-| list | 26.5 | 44.9 | 64.8 |
-| essay | 23.1 | 36.2 | 51.7 |
-| reading | 23.0 | 54.7 | 67.8 |
+That is the bf16 reference output — matching it proves both the quantized-KV path and the speculator
+are numerically clean. Then confirm the pool exceeds your context:
 
-Aggregate throughput scales well to C8; per-stream rate falls as expected. These predate the
-32-sample protocol — treat as indicative, re-measure before relying on them.
+```
+grep -aoE 'context_len=[0-9]+|max_total_num_tokens=[0-9]+' ~/inkling-serve.log | tail -2
+→ context_len=1048576    max_total_num_tokens=1082627
+```
 
-## What's in the box
+---
+
+## What you get
+
+| | **1M profile** (default) | 64K profile |
+|---|---|---|
+| launch | `./scripts/nvfp4-kv-boot.sh <rank>` | `CTX=65536 ./scripts/nvfp4-kv-boot.sh <rank>` |
+| context | **1,048,576** | 65,536 |
+| KV pool | **1,082,627 tokens** | 1,104,683 tokens |
+| decode | ~33 tok/s | ~33 tok/s |
+| accept (of 8) | ~3.5 | ~3.5 |
+
+All figures are `n=32` means (see [measurement protocol](docs/MEASUREMENT-PROTOCOL.md) —
+**single-run numbers on this stack are meaningless**; they vary 3–4× on identical config).
+
+- **Speculation is lossless** — DSpark output is byte-exact vs non-speculative decoding at temp 0.
+- **fp4 KV is quality-neutral** — byte-exact vs bf16 KV on the reference probe; needle-in-a-haystack
+  retrieval verified at **21K, 64K and 113K** token depths.
+- **Without quantized KV the pool caps near 354K tokens** — fp4 is what makes 1M reachable at all.
+- For scale: no speculation + no quantization ≈ 13 tok/s at 64K. This is ~2.6× that, at 16× the context.
+
+### ⚑ Expect accept ≈ 3.4 — that's the published spec, not a problem
+
+RadixArk's card reports `acc_len` **mean 3.348** across 9 datasets at temp 0 / block 7 — exactly this
+config (range 2.70 Arena-Hard → 4.79 GSM8K). **If you measure ~3.4 the speculator is working and
+there is nothing left to tune.** This repo's history contains a long hunt for a "7.31" that was
+simply a lucky draw from a nondeterministic distribution. The only lever beyond ~3.4 is finetuning
+the draft ([plan](docs/DRAFT-FINETUNE-PLAN.md); realistic ceiling ~4.2–4.6).
+
+---
+
+## Why patches are needed
+
+`scripts/bake-image.sh` bakes them all. Full symptom → cause → fix table for **22 walls** lives in
+[`docs/BUGS-AND-FIXES.md`](docs/BUGS-AND-FIXES.md). The load-bearing ones:
+
+| Area | Fix |
+|---|---|
+| **KV quantization** | The triton backend had none. `patches/kv-quant/` adds it: quantize **inside the pool** (Inkling has *three* KV writers — DSpark's hidden-state injector writes KV directly), an fp4 branch for the hybrid-SWA pool upstream never wrote, e2m1 nibble decode + block-16 scales in cloned kernels, correct fp4 byte accounting. Upstream's `decode_attention.py`/`extend_attention.py` stay **byte-untouched**. |
+| **DSpark draft OOB** | [sglang#30555](https://github.com/sgl-project/sglang/issues/30555) fixed *correctly*: one `-1` on the draft worker's width in `triton_backend.py`. (The issue's own suggested ServerArgs pin double-corrects on current builds — don't use it.) Fixes OOB draft-KV reads **and** unblocks decode CUDA graphs. |
+| **Conv-state commit off-by-one** *(novel)* | DSpark's `commit_lens` excludes the bonus token, but the sconv commit used it as a last-step index — state regressed and output degenerated into prompt-replay whenever accept > 1. Hits every non-symm-mem deployment, i.e. everything that isn't a B200-class single node. |
+| **GB10 kernel limits** | MoE grouped-GEMM `num_stages` 3/4→2 (99 KB smem vs B200's 228 KB); Helion sm_121 configs seeded; `emit_packed_topk=False`; **marlin is the only numerically-correct NVFP4 MoE runner** here (cutlass silently miscomputes, trtllm hard-fails). |
+| **Long-context speed** | The draft's context is pinned to its 64K adaptation, so declaring a huge context no longer craters acceptance. |
+
+---
+
+## Repo map
 
 | Path | What |
 |---|---|
-| `specs/001-oneshot-install/` | spec / plan / **tasks.md** — the gated one-shot install |
-| `scripts/bake-image.sh` | digest-pinned upstream image + all patches → `local/sglang-inkling:gb10` |
-| `scripts/inkling-sglang-launch.sh` | per-rank launcher; defaults = validated champion config |
-| `patches/files/` | the 6 net-patched SGLang files (byte-exact from the validated image) |
-| `patches/all-patches.diff` | the same as a reviewable 162-line unified diff |
-| `docs/BUGS-AND-FIXES.md` | all 18 walls with symptoms → root causes → fixes, incl. 2 upstream-worthy bugs |
-| `docs/MEASUREMENT-PROTOCOL.md` | **read before benchmarking** — this stack is nondeterministic at temp 0 |
-| `benchmarks/` | bench harness + raw results |
+| `scripts/nvfp4-kv-boot.sh` | **the champion launcher** (1M context, fp4 KV) |
+| `scripts/bake-image.sh` | builds `local/sglang-inkling:gb10[-kvquant]` from a digest-pinned upstream |
+| `scripts/inkling-sglang-launch.sh` | underlying launcher; every knob is an env var |
+| `patches/kv-quant/` | the KV-quantization implementation (6 files) |
+| `patches/files/` + `patches/all-patches.diff` | base GB10 patches, byte-exact and as a reviewable diff |
+| `docs/MEASUREMENT-PROTOCOL.md` | **read before benchmarking anything** |
+| `docs/BUGS-AND-FIXES.md` | 22 walls: symptom → root cause → fix |
+| `docs/KV-QUANT-IMPLEMENTATION-NOTES.md` | how the fp4 KV path works internally |
+| `docs/DRAFT-FINETUNE-PLAN.md` | the remaining accept lever (+ A4Q applicability appendix) |
+| `docs/ROADMAP.md` | done / blocked / why |
+| `benchmarks/accept_probe.py` | the 32-sample harness to use for every comparison |
+| `benchmarks/tests_verify_nvfp4.py` | 20 bitwise-exactness tests for the fp4 kernels |
+| `specs/001-oneshot-install/` | the same install as a **gated** task list for agents |
 
-## The two bugs you'd lose days on (both fixed here)
+**Agents**: start at [`specs/001-oneshot-install/tasks.md`](specs/001-oneshot-install/tasks.md).
 
-1. **DSpark draft gamma mismatch** ([sglang#30555](https://github.com/sgl-project/sglang/issues/30555), fixed *correctly*):
-   one `-1` in the triton backend's draft-worker width fixes out-of-bounds draft KV reads (which
-   otherwise pin accept near 1.0) **and** unblocks decode CUDA-graph capture. The issue's own
-   suggested ServerArgs pin double-corrects on current builds — don't use it.
-2. **DSpark conv-state commit off-by-one** (novel): on the non-symm-mem path (i.e., everything
-   that isn't a B200-class single-node), the sconv verify commit lands one token short and output
-   degenerates into prompt-replay whenever accept > 1. Fixed with a +1-biased torch-native commit —
-   **verified byte-exact lossless** against spec-off at temp 0.
+---
 
-## Champion config (encoded as launcher defaults)
+## Knobs
 
-`--attention-backend triton` (Inkling asserts fa4|triton; fa4 is sm_100-only) ·
-`--moe-runner-backend marlin` (the ONLY numerically-correct NVFP4 MoE on sm_121 — cutlass
-silently miscomputes, trtllm hard-fails) · `--page-size 1` · DSpark block 7, draft unquantized ·
-decode graphs {1,2,4,8}, prefill graphs off, piecewise off · `--mem-fraction-static 0.85` ·
-64K ctx (model supports 1M; the draft is 64K-adapted) · NCCL ≥2.30 over RoCE, `NCCL_NET=IB`,
-CUMEM/NVLS off, `/dev/infiniband` passed through.
+All are env vars on the launchers: `CTX` · `MEMFRAC` (0.85 default; 0.87 works, buys nothing
+measurable) · `MAXREQ` · `BLOCK` (7 is optimal; 15 is worse here) · `KVD` (`fp4_mx_block16` default —
+**not** `nvfp4`, which selects the flashinfer/trtllm recipe the triton lane cannot consume) ·
+`GRAPH_BS` · `IMAGE` · `EXTRA_ARGS`.
 
-## 🏆 NVFP4 KV cache — 3.12× context capacity at no speed cost
-
-The headline result of this repo. SGLang's triton attention backend (the only lane Inkling can use
-on sm_121a) shipped with **no KV quantization at all**. `patches/kv-quant/` adds a complete fp4 path.
-
-| Config | accept (n=32) | tok/s (n=32) | KV pool @ 64K ctx |
-|---|---|---|---|
-| bf16 KV (champion) | 3.44 ± 0.17 | 34.3 ± 1.7 | 354,077 |
-| **NVFP4 KV (`fp4_mx_block16`)** | **3.54 ± 0.16** | **32.9 ± 1.5** | **1,104,683** |
-
-Statistically identical speed, **3.12× the pool**, and output byte-exact against the bf16 reference
-at temp 0.
-
-### That makes a full 1M-token context serve real on two desktop machines
-
-```
---context-length 1048576  ->  context_len = 1,048,576
-                              max_total_num_tokens = 1,082,627   (pool EXCEEDS the context)
-```
-
-Self-consistent, not aspirational: the KV pool is larger than the declared context. Needle-in-a-
-haystack retrieval verified with fp4 KV at **21K, 64K and 113K** token depths (exact string recovered
-each time; 113K prompt processed in 109 s). For reference, bf16 KV tops out near 350K tokens on this
-pair and `fp8_e4m3` KV produces garbage (wall 13).
-
-```bash
-KVQUANT=1 ./scripts/bake-image.sh          # builds local/sglang-inkling:gb10-kvquant
-./scripts/nvfp4-kv-boot.sh 1               # worker first
-./scripts/nvfp4-kv-boot.sh 0               # then head
-```
-
-**Use `fp4_mx_block16`, not `nvfp4`.** In this image `--kv-cache-dtype nvfp4` selects the
-flashinfer/trtllm recipe (e4m3 block scales + checkpoint global scales) that the triton lane cannot
-consume; `fp4_mx_block16` is the triton-compatible packing (e2m1 + uint8 biased-exponent scale per
-16 elements). Identical capacity, 0.5625 bytes/element.
-
-What it took (details in [`docs/KV-QUANT-IMPLEMENTATION-NOTES.md`](docs/KV-QUANT-IMPLEMENTATION-NOTES.md)):
-- **Quantize inside the pool, not the backend** — Inkling has *three* KV writers, and DSpark's
-  hidden-state injector writes KV directly from the model file. Backend-side quantization crashes on
-  the first request (`ValueError: MXFP8 KV cache requires K and V scale tensors`).
-- **An fp4 pool branch for the hybrid-SWA layout**, which upstream never implemented, plus bypassing
-  the stock FP4 pool's whole-pool-dequant reader (we dequantize in-kernel instead).
-- **e2m1 nibble decode + block-16 scales** in cloned kernels — upstream's `decode_attention.py` /
-  `extend_attention.py` are left **byte-untouched** so triton cache keys and compiled binaries match
-  the champion exactly; all quantized code lives in a separate module imported only when enabled.
-- **fp4 byte accounting** in the pool configurator (`_element_size(float4_e2m1fn_x2)` is 1, so fp4
-  is otherwise over-counted 1.78×).
-- Validation: 20/20 GPU tests bitwise-exact against pristine kernels fed host-dequantized KV
-  ([`benchmarks/tests_verify_nvfp4.py`](benchmarks/tests_verify_nvfp4.py)), plus an **inertness gate**
-  — with quantization off the patched image measures 3.45 ± 0.22 vs champion 3.44 ± 0.17.
-
-## Serving profiles (context vs speed — measured)
-
-Declared context resizes the hybrid pools AND stretches the draft's rope scaling, so long-context
-costs DSpark speed even on short prompts. Pick a profile; all are lossless (bf16 KV, byte-exact gate passed):
-
-| Profile | Launch | KV pool (tokens) | note |
-|---|---|---|---|
-| **SPEED (default)** | `CTX=65536` | 674,816 | the measured champion; see the performance table above |
-| LONG-CTX | `CTX=524288` | 310,606 (in-flight cap) | with the draft-context cap, speed is comparable to 64K on prompts inside the draft's 64K adaptation |
-
-Earlier revisions listed per-profile tok/s from single runs (64.6 / 65.2 / 26.8). Those were
-single draws from a wide distribution and have been removed; re-measure any profile you care
-about with `benchmarks/accept_probe.py`.
-
-- The pool is shared across `--max-running-requests 8`; at 512K declared, one ~300K stream or 8×~38K.
-- **True 1M is not reachable on 2× GB10**: bf16 pools cap out as above, and **FP8 KV
-  (`--kv-cache-dtype fp8_e4m3`) produces catastrophic garbage output on this stack** (`!!!!…`) —
-  documented as wall #13. Do not use it.
-- The DSpark draft is 64K-adapted: accept also fades with actual prompt depth past ~64K.
+Leave `SGLANG_RAGGED_VERIFY_MODE` **unset**: `compact` crashes Inkling's sconv JIT, and `cap-accept`
+needs calibration artifacts (see [ROADMAP](docs/ROADMAP.md)).
 
 ## Provenance
 
-Upstream image: `lmsysorg/sglang@sha256:fbea1a4e25b26660dbc2384a27ead8817e9b7670f257b5c3143e0450d14524d7`
-(`dev-cu13-inkling-dspark`, pushed 2026-07-30). Model: thinkingmachines/Inkling-Small-NVFP4.
-Draft: RadixArk/Inkling-Small-DSpark-Preview. All patches are against files inside that image;
-`patches/all-patches.diff` is the complete delta. Not affiliated with LMSYS, Thinking Machines,
-RadixArk, or NVIDIA — this is an independent field port.
+Upstream image `lmsysorg/sglang@sha256:fbea1a4e25b26660dbc2384a27ead8817e9b7670f257b5c3143e0450d14524d7`
+(`dev-cu13-inkling-dspark`, 2026-07-30); all patches are against files inside it. Not affiliated with
+LMSYS, Thinking Machines, RadixArk, or NVIDIA — an independent field port.

@@ -31,7 +31,8 @@ at the mount path; total ≈161 GB.
 ## T2 — Bake the patched image (both nodes)
 
 ```bash
-./scripts/bake-image.sh     # pulls lmsysorg/sglang@sha256:fbea1a4e... (digest-pinned), applies patches, commits local/sglang-inkling:gb10
+KVQUANT=1 ./scripts/bake-image.sh   # digest-pinned upstream + all patches
+                                    # -> local/sglang-inkling:gb10  AND  :gb10-kvquant (fp4 KV)
 ```
 
 What it bakes (full deltas in `patches/all-patches.diff`, mechanisms in `docs/BUGS-AND-FIXES.md`):
@@ -46,24 +47,26 @@ What it bakes (full deltas in `patches/all-patches.diff`, mechanisms in `docs/BU
 7. `triton_backend.py`: draft workers use gamma (= dspark_block_size), not the target's gamma+1
    (upstream sgl-project/sglang#30555; fixes both draft-KV OOB reads AND decode-graph capture).
 
-**GATE T2**: script prints `nccl 23xxx` and `BAKED local/sglang-inkling:gb10` on BOTH nodes.
+**GATE T2**: script prints `nccl 23xxx`, `BAKED local/sglang-inkling:gb10` **and**
+`BAKED local/sglang-inkling:gb10-kvquant` on BOTH nodes.
 
 ## T3 — Launch (rank 1 first, then rank 0)
 
 ```bash
-# on the worker:
-MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount> ./scripts/inkling-sglang-launch.sh 1
-# on the head:
-MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount> ./scripts/inkling-sglang-launch.sh 0
+# CHAMPION: 1M context + NVFP4 KV.  worker FIRST, then head.
+MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./scripts/nvfp4-kv-boot.sh 1
+MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./scripts/nvfp4-kv-boot.sh 0
 ```
+
+(For a bf16-KV serve instead, use `./scripts/inkling-sglang-launch.sh <rank>` — same flags, ~354K pool.)
 
 Defaults encode the measured champion: marlin MoE · triton attention **+ fp32 reduction** ·
 page-size 1 · DSpark block 7 · decode graphs · mem-fraction 0.85 · 64K ctx · conv-commit fix ·
 draft-context cap.
 Boot takes ~6-8 min (156 GB NFS weight load). Watch: `docker logs -f inkling-sglang`.
 
-**GATE T3**: log shows `Initialized DSpark draft runner ... gamma=7` AND
-`The server is fired up and ready to roll!`. If the scheduler dies on the first request,
+**GATE T3**: log shows `Initialized DSpark draft runner ... gamma=7`, `The server is fired up and
+ready to roll!`, and `max_total_num_tokens` **greater than** `context_len` (≈1,082,627 vs 1,048,576). If the scheduler dies on the first request,
 see the wall table in `docs/BUGS-AND-FIXES.md` — every failure we hit is listed with its fix.
 
 ## T4 — Verify losslessness (MANDATORY before trusting any numbers)
