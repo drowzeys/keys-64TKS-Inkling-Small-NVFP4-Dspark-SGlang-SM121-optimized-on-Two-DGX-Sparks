@@ -32,8 +32,11 @@ HF_HUB_ENABLE_HF_TRANSFER=1 ~/hfdl-venv/bin/hf download \
 HF_HUB_ENABLE_HF_TRANSFER=1 ~/hfdl-venv/bin/hf download \
   RadixArk/Inkling-Small-DSpark-Preview --local-dir <STORE>/inkling/dspark-draft
 
-# 2) build the image — ON EACH NODE (digest-pinned upstream + every patch)
-KVQUANT=1 ./scripts/bake-image.sh
+# 2) get the image — ON EACH NODE.  Either pull the prebuilt one (fastest):
+docker pull ghcr.io/drowzeys/inkling-sglang-gb10:kvquant
+docker tag  ghcr.io/drowzeys/inkling-sglang-gb10:kvquant local/sglang-inkling:gb10-kvquant
+#    ...or build it yourself from the digest-pinned upstream + patches in this repo:
+# KVQUANT=1 ./scripts/bake-image.sh
 
 # 3) launch — WORKER FIRST, then head. Defaults are the champion config.
 #    worker:
@@ -41,6 +44,10 @@ MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./
 #    head:
 MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./scripts/nvfp4-kv-boot.sh 0
 ```
+
+The prebuilt image is exactly what `KVQUANT=1 ./scripts/bake-image.sh` produces — same patches, same
+digest-pinned base — published so you don't have to rebuild. Verify it if you like:
+`docker run --rm --entrypoint bash ghcr.io/drowzeys/inkling-sglang-gb10:kvquant -c 'ls /sgl-workspace/sglang/python/sglang/srt/mem_cache/kv_quant_pools.py'`
 
 `IF` is the NIC carrying the inter-node link, `HCA` its RDMA device (`ibv_devices`). Boot takes
 ~8 min (156 GB weight load + first-run JIT); follow it with `docker logs -f inkling-sglang`.
