@@ -45,6 +45,21 @@ MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./
 MASTER_IP=<rank0-link-ip> IF=<link-nic> HCA=<rdma-dev> MODELS=<mount>/inkling ./scripts/nvfp4-kv-boot.sh 0
 ```
 
+**On the image size**: it reports ~43 GB, but **only ~473 MB of that is ours** — 42.2 GB is
+upstream's `lmsysorg/sglang:dev-cu13-inkling-dspark` dev image (CUDA 13 toolkit + PyTorch +
+FlashInfer AOT cubins + SGLang kernels for sm_80/90/100/110/120). Docker layers are
+content-addressed, so **if you already have that upstream image, pulling ours downloads only the
+differing layers (~473 MB)** — of which 471 MB is the mandatory NCCL 2.30 upgrade; every code patch
+is under half a megabyte. To make the pull cheap deliberately:
+
+```bash
+docker pull lmsysorg/sglang@sha256:fbea1a4e25b26660dbc2384a27ead8817e9b7670f257b5c3143e0450d14524d7
+docker pull ghcr.io/drowzeys/inkling-sglang-gb10:kvquant   # now only ~473 MB of new layers
+```
+
+(We don't ship a slimmed base: the "unused" architecture cubins aren't safely removable — `sgl_kernel`
+loads its **sm100** variant on GB10, which is one of the quirks documented in the walls table.)
+
 The prebuilt image is exactly what `KVQUANT=1 ./scripts/bake-image.sh` produces — same patches, same
 digest-pinned base — published so you don't have to rebuild. Verify it if you like:
 `docker run --rm --entrypoint bash ghcr.io/drowzeys/inkling-sglang-gb10:kvquant -c 'ls /sgl-workspace/sglang/python/sglang/srt/mem_cache/kv_quant_pools.py'`
