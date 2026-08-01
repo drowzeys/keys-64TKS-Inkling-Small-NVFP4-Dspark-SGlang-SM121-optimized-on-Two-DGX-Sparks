@@ -1,4 +1,4 @@
-# keys-64TKS · Inkling-Small-NVFP4 + DSpark · SGLang · sm_121a · Two DGX Sparks
+# keys-1M context· Inkling-Small-NVFP4 + DSpark +NVFP4 KV· SGLang · sm_121a · Two DGX Sparks
 
 **64 tok/s single-stream, lossless speculative decoding, on two desktop DGX Sparks.**
 The first known deployment of [thinkingmachines/Inkling-Small-NVFP4](https://huggingface.co/thinkingmachines/Inkling-Small-NVFP4)
