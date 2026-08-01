@@ -21,8 +21,19 @@ Committed follow-on campaigns (in order):
    **Status: scoped + in progress** — full kernel-level plan in `KV-QUANT-TRITON-PLAN.md`
    (mxfp8 write path already exists for the triton page-1 layout; ~240 lines across 4 files
    for full mxfp8, ~250 more for nvfp4; capacity payoff 1.94×/3.5×).
-2. **A4Q activation quantization** (jethac, Blackwell ISA — GB10 shares the RTX 5090 ISA):
-   prefill/TTFT acceleration, decode-neutral. Ported after NVFP4-KV.
+3. ~~**A4Q native-fp4 attention**~~ — ❌ **NOT APPLICABLE to Inkling-Small on SGLang.** Evaluated and
+   rejected on four independent grounds:
+   - **KV width 1024** (8 kv-heads × 128 head_dim). A4Q's gain scales with KV width and needs
+     **≥4096** to amortize its quantization overhead — at 1024 it is expected to be a net loss.
+   - **Implementation is a FlashInfer FA2 kernel**, but Inkling asserts `attention_backend in
+     ("fa4","triton")` and fa4 is sm_100-only ⇒ triton is the only legal lane on GB10 (wall 1).
+     There is no seam to attach it to.
+   - **It is a vLLM integration**, not SGLang.
+   - **Inkling is sliding-window (512) + short-conv**, so its attention prefill is closer to linear
+     than quadratic; A4Q's advantage comes precisely from accelerating quadratic prefill.
+
+   A4Q remains excellent for *dense-GQA, wide-KV* models on vLLM (measured elsewhere on this fleet:
+   Nemotron-3-Omni TTFT −22% @60K scaling to −39% @256K). It is simply the wrong tool for this model.
 4. **DSpark cap-accept calibration — BLOCKED on this build.** The confidence (STS) recorder only runs
    inside the cap-accept planner, but the planner degenerates to verify-all until an SPS cost table
    exists (`sps_table=uninitialized ... zero scheduling gain`), and the SPS recorder writes through an
