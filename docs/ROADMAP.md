@@ -34,7 +34,13 @@ Committed follow-on campaigns (in order):
 
    A4Q remains excellent for *dense-GQA, wide-KV* models on vLLM (measured elsewhere on this fleet:
    Nemotron-3-Omni TTFT −22% @60K scaling to −39% @256K). It is simply the wrong tool for this model.
-4. **DSpark cap-accept calibration — BLOCKED on this build.** The confidence (STS) recorder only runs
+4. ~~**DSpark cap-accept calibration**~~ — ✅ **RESOLVED: it works, and it still loses.** Both
+   artifacts were produced (SPS table with `match_fraction=1.00`; STS from 19,871 samples, ECE
+   0.03651→0.03453 with a joint coordinate-descent fitter that beats the shipped greedy one).
+   Calibrated cap-accept reaches accept 3.39 ± 0.18 — statistically level with static — but at
+   23.4 ± 1.3 tok/s vs 34.7 ± 1.5. Full mechanism in
+   [DSPARK-CALIBRATION-FINDINGS.md](DSPARK-CALIBRATION-FINDINGS.md). **Keep static block-7.**
+   *(superseded note, kept for context:)* The confidence (STS) recorder only runs
    inside the cap-accept planner, but the planner degenerates to verify-all until an SPS cost table
    exists (`sps_table=uninitialized ... zero scheduling gain`), and the SPS recorder writes through an
    info-dumper with no retrievable output path exposed. So cap-accept cannot be calibrated here and
