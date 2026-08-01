@@ -29,7 +29,10 @@ ATTN=${ATTN:-triton}                    # Inkling asserts fa4|triton; fa4 is sm_
 MOE=${MOE:-marlin}                      # ONLY numerically-correct NVFP4 MoE runner on sm_121
 FP4GEMM=${FP4GEMM:-flashinfer_trtllm}   # dense FP4 GEMMs are fine on sm_121
 MEMFRAC=${MEMFRAC:-0.85}      # 0.87 works but buys nothing measurable; 0.85 is the fleet-safe ceiling
-CTX=${CTX:-65536}          # 64K = measured champion; larger ctx shrinks the KV pool                       # draft is 64K-adapted; model itself goes to 1M
+CTX=${CTX:-65536}          # bf16-KV default. With bf16 the pool shrinks sharply as ctx grows
+                           # (SWA/mamba reserves scale with ctx), so 64K is the sane bf16 setting.
+                           # For 1M use scripts/nvfp4-kv-boot.sh — with fp4 KV the pool barely moves
+                           # (1,104,683 @64K vs 1,082,627 @1M, ~2%), so 1M is essentially free there.
 SPEC=${SPEC:-1}
 GRAPHS=${GRAPHS:-1}
 PAGE=${PAGE:-1}                         # page 128 corrupts the triton verify path

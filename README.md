@@ -22,7 +22,7 @@ of storage for weights, reachable at the **same path** on both nodes (NFS or loc
 
 ```bash
 # 0) on the HEAD node (rank 0), with SSH access to the worker
-git clone https://github.com/drowzeys/keys-1M-CTX-Inkling-Small-NVFP4-Dspark-SGlang-SM121-optimized-on-Two-DGX-Sparks.git
+git clone https://github.com/drowzeys/keys-1M-CTX-Inkling-Small-NVFP4-Dspark-NVFP4-KV-Cache-SGlang-SM121-optimized-on-Two-DGX-Sparks.git
 cd keys-1M-CTX-*
 
 # 1) weights — once, wherever the shared storage lives
@@ -161,6 +161,12 @@ by the second shell and the worker silently never launches (you'll see `1/2 clie
 ---
 
 ## What you get
+
+**Context is nearly free with fp4 KV.** The KV pool barely moves between 64K and 1M
+(1,104,683 → 1,082,627 tokens, ~2%), because the SWA/mamba reserves that scale with context are
+small next to a quantized pool. That is *not* true on bf16, where the same change costs most of the
+pool — which is why `scripts/inkling-sglang-launch.sh` (the bf16 path) still defaults to 64K while
+the champion launcher defaults to the full 1M.
 
 | | **1M profile** (default) | 64K profile |
 |---|---|---|

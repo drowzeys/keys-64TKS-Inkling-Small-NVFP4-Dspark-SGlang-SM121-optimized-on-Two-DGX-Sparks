@@ -173,6 +173,6 @@ Needle-in-a-haystack retrieval verified at 21K, 64K, and 113K token depths. Spec
 
 Everything — patched files, the digest-pinned bake script, the exact launch invocation, the 32-sample benchmark harness, 20 bitwise kernel tests, and all 22 walls with symptoms and fixes — is public:
 
-**github.com/drowzeys/keys-1M-CTX-Inkling-Small-NVFP4-Dspark-SGlang-SM121-optimized-on-Two-DGX-Sparks**
+**github.com/drowzeys/keys-1M-CTX-Inkling-Small-NVFP4-Dspark-NVFP4-KV-Cache-SGlang-SM121-optimized-on-Two-DGX-Sparks**
 
 Two desktop machines. A 276B model. A million tokens of context. No datacenter required.
