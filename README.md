@@ -199,6 +199,7 @@ the draft ([plan](docs/DRAFT-FINETUNE-PLAN.md); realistic ceiling ~4.2–4.6).
 | `benchmarks/accept_probe.py` | the 32-sample harness to use for every comparison |
 | `benchmarks/tests_verify_nvfp4.py` | 20 bitwise-exactness tests for the fp4 kernels |
 | `specs/001-oneshot-install/` | the same install as a **gated** task list for agents |
+| [`Journal log/`](Journal%20log/) | long-form build write-ups — the story behind the fixes |
 
 **Agents**: start at [`specs/001-oneshot-install/tasks.md`](specs/001-oneshot-install/tasks.md).
 
