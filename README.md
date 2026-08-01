@@ -1,6 +1,6 @@
-# keys-1M-context · Inkling-Small-NVFP4 + DSpark · SGLang · sm_121a · Two DGX Sparks
+# keys-1M-context · Inkling-Small-NVFP4 + DSpark + NVFP4 KV Cache · SGLang · sm_121a · Two DGX Sparks
 
-**A full 1M-token context on two desktop DGX Sparks — for
+**A full 1M-token context on two desktop DGX Sparks, first implemented NVFP4 KV cache on SGlang — for
 Inkling-Small NVFP4 + DSpark.**
 
 Serve [thinkingmachines/Inkling-Small-NVFP4](https://huggingface.co/thinkingmachines/Inkling-Small-NVFP4)
