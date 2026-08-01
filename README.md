@@ -90,7 +90,19 @@ on sm_121a) shipped with **no KV quantization at all**. `patches/kv-quant/` adds
 | **NVFP4 KV (`fp4_mx_block16`)** | **3.54 ± 0.16** | **32.9 ± 1.5** | **1,104,683** |
 
 Statistically identical speed, **3.12× the pool**, and output byte-exact against the bf16 reference
-at temp 0. That is > 1M tokens of KV on two desktop-class machines.
+at temp 0.
+
+### That makes a full 1M-token context serve real on two desktop machines
+
+```
+--context-length 1048576  ->  context_len = 1,048,576
+                              max_total_num_tokens = 1,082,627   (pool EXCEEDS the context)
+```
+
+Self-consistent, not aspirational: the KV pool is larger than the declared context. Needle-in-a-
+haystack retrieval verified with fp4 KV at **21K, 64K and 113K** token depths (exact string recovered
+each time; 113K prompt processed in 109 s). For reference, bf16 KV tops out near 350K tokens on this
+pair and `fp8_e4m3` KV produces garbage (wall 13).
 
 ```bash
 KVQUANT=1 ./scripts/bake-image.sh          # builds local/sglang-inkling:gb10-kvquant
