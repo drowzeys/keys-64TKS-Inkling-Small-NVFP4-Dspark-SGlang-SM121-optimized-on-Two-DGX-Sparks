@@ -181,6 +181,12 @@ All figures are `n=32` means (see [measurement protocol](docs/MEASUREMENT-PROTOC
 
 ### ⚑ Expect accept ≈ 3.4 — that's the published spec, not a problem
 
+*(Note on the scale: `accept_len` maxes at **gamma+1 = 8** at block size 7, because the bonus token
+counts. The SGLang serving path proposes all 7 draft rows — it does **not** slice to 6 the way the
+HuggingFace reference `spec_generate` does. If you analyze or train a draft against this serve, use
+the serving contract: row *i* predicts position *a+1+i*, with the markov head chained from the bonus
+token.)*
+
 RadixArk's card reports `acc_len` **mean 3.348** across 9 datasets at temp 0 / block 7 — exactly this
 config (range 2.70 Arena-Hard → 4.79 GSM8K). **If you measure ~3.4 the speculator is working and
 there is nothing left to tune.** This repo's history contains a long hunt for a "7.31" that was
