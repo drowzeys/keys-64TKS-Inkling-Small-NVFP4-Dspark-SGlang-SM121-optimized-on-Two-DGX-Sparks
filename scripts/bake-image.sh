@@ -34,3 +34,19 @@ docker start -a inkling-bake
 docker commit inkling-bake "$TAG" >/dev/null
 docker rm inkling-bake >/dev/null
 echo "== BAKED $TAG"
+
+# Optional: KV-quant build (NVFP4 / mxfp8 KV cache — 3.12x KV pool). KVQUANT=1 ./bake-image.sh
+if [ "${KVQUANT:-0}" = "1" ]; then
+  echo "== baking KV-quant overlay -> local/sglang-inkling:gb10-kvquant"
+  docker rm -f kvq 2>/dev/null || true
+  docker create --name kvq --entrypoint true "$TAG" >/dev/null
+  docker cp "$REPO_DIR/patches/kv-quant/srt/models/inkling_common/attn.py"        kvq:$SGL/srt/models/inkling_common/attn.py
+  docker cp "$REPO_DIR/patches/kv-quant/srt/layers/attention/triton_backend.py"   kvq:$SGL/srt/layers/attention/triton_backend.py
+  docker cp "$REPO_DIR/patches/kv-quant/srt/mem_cache/kv_quant_pools.py"          kvq:$SGL/srt/mem_cache/kv_quant_pools.py
+  docker cp "$REPO_DIR/patches/kv-quant/srt/mem_cache/kv_cache_configurator.py"   kvq:$SGL/srt/mem_cache/kv_cache_configurator.py
+  docker cp "$REPO_DIR/patches/kv-quant/srt/model_executor/pool_configurator.py"  kvq:$SGL/srt/model_executor/pool_configurator.py
+  docker cp "$REPO_DIR/patches/kv-quant/kernels/ops/attention/kv_quant_attention.py" kvq:$SGL/kernels/ops/attention/kv_quant_attention.py
+  docker commit kvq local/sglang-inkling:gb10-kvquant >/dev/null
+  docker rm kvq >/dev/null
+  echo "== BAKED local/sglang-inkling:gb10-kvquant"
+fi

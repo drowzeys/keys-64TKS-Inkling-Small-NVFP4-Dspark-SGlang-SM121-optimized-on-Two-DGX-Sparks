@@ -79,6 +79,45 @@ decode graphs {1,2,4,8}, prefill graphs off, piecewise off · `--mem-fraction-st
 64K ctx (model supports 1M; the draft is 64K-adapted) · NCCL ≥2.30 over RoCE, `NCCL_NET=IB`,
 CUMEM/NVLS off, `/dev/infiniband` passed through.
 
+## 🏆 NVFP4 KV cache — 3.12× context capacity at no speed cost
+
+The headline result of this repo. SGLang's triton attention backend (the only lane Inkling can use
+on sm_121a) shipped with **no KV quantization at all**. `patches/kv-quant/` adds a complete fp4 path.
+
+| Config | accept (n=32) | tok/s (n=32) | KV pool @ 64K ctx |
+|---|---|---|---|
+| bf16 KV (champion) | 3.44 ± 0.17 | 34.3 ± 1.7 | 354,077 |
+| **NVFP4 KV (`fp4_mx_block16`)** | **3.54 ± 0.16** | **32.9 ± 1.5** | **1,104,683** |
+
+Statistically identical speed, **3.12× the pool**, and output byte-exact against the bf16 reference
+at temp 0. That is > 1M tokens of KV on two desktop-class machines.
+
+```bash
+KVQUANT=1 ./scripts/bake-image.sh          # builds local/sglang-inkling:gb10-kvquant
+./scripts/nvfp4-kv-boot.sh 1               # worker first
+./scripts/nvfp4-kv-boot.sh 0               # then head
+```
+
+**Use `fp4_mx_block16`, not `nvfp4`.** In this image `--kv-cache-dtype nvfp4` selects the
+flashinfer/trtllm recipe (e4m3 block scales + checkpoint global scales) that the triton lane cannot
+consume; `fp4_mx_block16` is the triton-compatible packing (e2m1 + uint8 biased-exponent scale per
+16 elements). Identical capacity, 0.5625 bytes/element.
+
+What it took (details in [`docs/KV-QUANT-IMPLEMENTATION-NOTES.md`](docs/KV-QUANT-IMPLEMENTATION-NOTES.md)):
+- **Quantize inside the pool, not the backend** — Inkling has *three* KV writers, and DSpark's
+  hidden-state injector writes KV directly from the model file. Backend-side quantization crashes on
+  the first request (`ValueError: MXFP8 KV cache requires K and V scale tensors`).
+- **An fp4 pool branch for the hybrid-SWA layout**, which upstream never implemented, plus bypassing
+  the stock FP4 pool's whole-pool-dequant reader (we dequantize in-kernel instead).
+- **e2m1 nibble decode + block-16 scales** in cloned kernels — upstream's `decode_attention.py` /
+  `extend_attention.py` are left **byte-untouched** so triton cache keys and compiled binaries match
+  the champion exactly; all quantized code lives in a separate module imported only when enabled.
+- **fp4 byte accounting** in the pool configurator (`_element_size(float4_e2m1fn_x2)` is 1, so fp4
+  is otherwise over-counted 1.78×).
+- Validation: 20/20 GPU tests bitwise-exact against pristine kernels fed host-dequantized KV
+  ([`benchmarks/tests_verify_nvfp4.py`](benchmarks/tests_verify_nvfp4.py)), plus an **inertness gate**
+  — with quantization off the patched image measures 3.45 ± 0.22 vs champion 3.44 ± 0.17.
+
 ## Serving profiles (context vs speed — measured)
 
 Declared context resizes the hybrid pools AND stretches the draft's rope scaling, so long-context
