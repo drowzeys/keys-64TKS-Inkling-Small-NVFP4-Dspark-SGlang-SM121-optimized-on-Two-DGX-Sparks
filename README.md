@@ -176,28 +176,44 @@ the champion launcher defaults to the full 1M.
 | decode | ~33 tok/s | ~33 tok/s |
 | accept (of 8) | ~3.5 | ~3.5 |
 
-All figures are `n=32` means (see [measurement protocol](docs/MEASUREMENT-PROTOCOL.md) —
-**single-run numbers on this stack are meaningless**; they vary 3–4× on identical config).
+### Throughput depends heavily on workload — quote a task class, always
+
+Measured on this stack, stock draft, temp 0, `n=32` per class (harness:
+[`benchmarks/accept_probe.py`](benchmarks/accept_probe.py)):
+
+| workload | accept (of 8) | tok/s |
+|---|---|---|
+| GSM8K-style (short, structured) | **4.81 ± 0.14** | — |
+| code explanation | 2.46 ± 0.05 | 26.0 ± 0.6 |
+| chat | 2.20 ± 0.03 | 23.2 ± 0.3 |
+| open-ended prose | 2.15 ± 0.03 | 22.6 ± 0.3 |
+| **pooled open-ended mix (n=96)** | **2.27 ± 0.03** | **23.9 ± 0.3** |
+
+**Plan against ~24 tok/s for open-ended work and ~2× that for short structured tasks.** The spread is
+not noise — it's the same gradient RadixArk's card shows across its nine datasets (GSM8K 4.79 →
+Arena-Hard 2.70): predictable, templated text drafts well; novel open-ended prose does not.
+Our GSM8K-style number reproduces theirs to within 0.02, which is what validates the harness.
+
+> **Correction (2026-08-01):** earlier revisions of this README published **3.44 accept / 34.3 tok/s**
+> from a raw-continuation probe (untemplated text through `/generate`). That probe turns out to
+> inflate acceptance by ~60%, because this model *echoes* untemplated input — and repetitive text is
+> trivially draftable. The number was real but unrepresentative. It is kept below as a legacy
+> reference so older figures remain comparable, not as an expectation.
+>
+> | legacy raw-continuation probe | 3.44 ± 0.17 | 34.3 ± 1.7 |
+> |---|---|---|
 
 - **Speculation is lossless** — DSpark output is byte-exact vs non-speculative decoding at temp 0.
-- **fp4 KV is quality-neutral** — byte-exact vs bf16 KV on the reference probe; needle-in-a-haystack
-  retrieval verified at **21K, 64K and 113K** token depths.
+- **fp4 KV is quality-neutral** — byte-exact vs bf16 KV on the reference probe; needle retrieval
+  verified at **21K, 64K and 113K** token depths.
 - **Without quantized KV the pool caps near 354K tokens** — fp4 is what makes 1M reachable at all.
-- For scale: no speculation + no quantization ≈ 13 tok/s at 64K. This is ~2.6× that, at 16× the context.
+- Reference point: no speculation at all is ~13 tok/s.
 
-### ⚑ Expect accept ≈ 3.4 — that's the published spec, not a problem
+### Config detail worth matching
 
-*(Note on the scale: `accept_len` maxes at **gamma+1 = 8** at block size 7, because the bonus token
-counts. The SGLang serving path proposes all 7 draft rows — it does **not** slice to 6 the way the
-HuggingFace reference `spec_generate` does. If you analyze or train a draft against this serve, use
-the serving contract: row *i* predicts position *a+1+i*, with the markov head chained from the bonus
-token.)*
-
-RadixArk's card reports `acc_len` **mean 3.348** across 9 datasets at temp 0 / block 7 — exactly this
-config (range 2.70 Arena-Hard → 4.79 GSM8K). **If you measure ~3.4 the speculator is working and
-there is nothing left to tune.** This repo's history contains a long hunt for a "7.31" that was
-simply a lucky draw from a nondeterministic distribution. The only lever beyond ~3.4 is finetuning
-the draft ([plan](docs/DRAFT-FINETUNE-PLAN.md); realistic ceiling ~4.2–4.6).
+The chat template defaults to **thinking effort 0.9**; RadixArk's card measured at **0.99**. Setting
+0.99 is worth +0.06 accept (~1.4σ) and costs nothing — but note it explains very little: sweeping the
+full 0.0 → 0.99 range moves accept only +0.11. Workload composition dominates everything else.
 
 ---
 

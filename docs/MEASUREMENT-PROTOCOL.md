@@ -20,6 +20,17 @@ this campaign that trap produced, on **identical** configs and images: 7.31, 2.4
 and sent two separate agent sessions chasing a "regression" that never existed. An early headline
 of "64.6 tok/s" was one lucky draw from a distribution whose mean was ~30.
 
+## Two traps that produced published-but-wrong numbers here
+
+**1. The echo trap inflates acceptance ~60%.** Feeding untemplated text to `/generate` makes this
+model regurgitate the prompt, and repetitive output drafts trivially. A raw-continuation probe
+measured 3.44 accept / 34.3 tok/s where a chat-templated, serving-representative gate measures
+2.27 / 23.9. Always benchmark through the model's own chat template.
+
+**2. Acceptance is task-dependent by more than 2×.** On this exact serve: GSM8K-style 4.81,
+code 2.46, chat 2.20, open-ended prose 2.15. A single pooled number hides that. Report per class,
+and say which class you measured — a "faster" config may simply have been measured on easier text.
+
 ## The protocol
 
 Use [`benchmarks/accept_probe.py`](../benchmarks/accept_probe.py):
