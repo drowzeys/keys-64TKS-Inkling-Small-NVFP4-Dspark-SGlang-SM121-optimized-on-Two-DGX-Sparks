@@ -22,8 +22,8 @@ of storage for weights, reachable at the **same path** on both nodes (NFS or loc
 
 ```bash
 # 0) on the HEAD node (rank 0), with SSH access to the worker
-git clone https://github.com/drowzeys/keys-64TKS-Inkling-Small-NVFP4-Dspark-SGlang-SM121-optimized-on-Two-DGX-Sparks.git
-cd keys-64TKS-*
+git clone https://github.com/drowzeys/keys-1M-CTX-Inkling-Small-NVFP4-Dspark-SGlang-SM121-optimized-on-Two-DGX-Sparks.git
+cd keys-1M-CTX-*
 
 # 1) weights — once, wherever the shared storage lives
 python3 -m venv ~/hfdl-venv && ~/hfdl-venv/bin/pip install -q huggingface_hub hf_transfer
