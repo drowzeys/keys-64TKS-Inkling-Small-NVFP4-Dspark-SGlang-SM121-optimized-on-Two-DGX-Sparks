@@ -1,6 +1,6 @@
 # keys-1M context· Inkling-Small-NVFP4 + DSpark +NVFP4 KV· SGLang · sm_121a · Two DGX Sparks
 
-**64 tok/s single-stream, lossless speculative decoding, on two desktop DGX Sparks.**
+**1M context two DGX Sparks. with first NVFP4 KV cache + DSpark for Inkling-Small NVFP4 **
 The first known deployment of [thinkingmachines/Inkling-Small-NVFP4](https://huggingface.co/thinkingmachines/Inkling-Small-NVFP4)
 (276B total / 12B active MoE) with the [RadixArk DSpark speculator](https://huggingface.co/RadixArk/Inkling-Small-DSpark-Preview)
 off datacenter Blackwell — TP=2 over a single 200G link between two GB10 (sm_121a) machines.
