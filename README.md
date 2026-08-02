@@ -87,10 +87,11 @@ grep -aoE 'context_len=[0-9]+|max_total_num_tokens=[0-9]+' ~/inkling-serve.log |
 
 ---
 
-## The exact recipe (what the launcher actually runs)
+## The exact recipe (final — what the launcher actually runs)
 
-If you prefer to run it by hand, or need to adapt it, this is the champion invocation verbatim.
-`scripts/nvfp4-kv-boot.sh` is exactly this with the site values as env vars.
+This is the settled champion invocation, verbatim. `scripts/nvfp4-kv-boot.sh` is exactly this with
+site values as env vars. The draft is the **stock RadixArk checkpoint** — unmodified, and that is
+deliberate: a 2M-token finetune campaign failed to beat it (see the status table below).
 
 ```bash
 docker run --name inkling-sglang --rm --gpus all --network host --ipc host \
@@ -285,8 +286,15 @@ measurable) · `MAXREQ` · `BLOCK` (7 is optimal; 15 is worse here) · `KVD` (`f
 **not** `nvfp4`, which selects the flashinfer/trtllm recipe the triton lane cannot consume) ·
 `GRAPH_BS` · `IMAGE` · `EXTRA_ARGS`.
 
+**Defaults are the measured optimum — you probably shouldn't change these:**
+`BLOCK=7` (15 is worse), `MEMFRAC=0.85` (0.87 boots but buys nothing), `KVD=fp4_mx_block16`,
+`--moe-runner-backend marlin`, `--page-size 1`, decode graphs on / prefill graphs off.
+
 Leave `SGLANG_RAGGED_VERIFY_MODE` **unset**: `compact` crashes Inkling's sconv JIT, and `cap-accept`
-needs calibration artifacts (see [ROADMAP](docs/ROADMAP.md)).
+loses ~33% throughput even with both calibration artifacts fitted
+([measured](docs/DSPARK-CALIBRATION-FINDINGS.md)).
+
+`CTX` is the one knob worth touching — 1M is the default and costs ~2% of the pool versus 64K.
 
 ## Provenance
 

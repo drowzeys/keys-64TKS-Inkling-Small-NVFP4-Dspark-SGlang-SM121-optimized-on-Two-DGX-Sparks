@@ -1,5 +1,10 @@
 # Roadmap
 
+> **Status as of 2026-08-01: the serving stack is settled.** Everything in the "shipped" column of
+> the README's status table is done and measured. The remaining items below are either closed with
+> a verdict (do not re-run) or genuinely open for someone with different constraints.
+
+
 Committed follow-on campaigns (in order):
 
 0. **STS + SPS calibration for cap-accept scheduling** (tooling shipped in `benchmarks/`): the
