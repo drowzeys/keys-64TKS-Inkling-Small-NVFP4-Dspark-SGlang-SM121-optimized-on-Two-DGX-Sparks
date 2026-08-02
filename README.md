@@ -176,6 +176,29 @@ the champion launcher defaults to the full 1M.
 | decode | ~33 tok/s | ~33 tok/s |
 | accept (of 8) | ~3.5 | ~3.5 |
 
+### Everything we tried, and where it landed
+
+This repo is the end state of a full optimization campaign. Every lever below was measured, not
+assumed — the ones that failed are listed because knowing what *doesn't* work here saves you the
+same days it cost us.
+
+| lever | verdict | evidence |
+|---|---|---|
+| **NVFP4 KV cache** | ✅ **shipped — 3.12× pool, enables 1M context** | 354K → 1,104,683 tokens, byte-exact quality, needle-verified to 113K |
+| **DSpark speculation (stock draft)** | ✅ **shipped — lossless, ~2× over no-spec** | byte-exact vs non-speculative at temp 0 |
+| **fp32 attention reduction** | ✅ shipped (modest) | +11% accept / +15% tok/s, ~1.4σ — free, so kept |
+| **Decode CUDA graphs, block-7, marlin MoE, page-1** | ✅ shipped | each measured; see the flag table above |
+| Draft finetune | ❌ **failed — do not re-run** | 5 runs, 2 LRs, 3 data scales: no config beat stock ([writeup](Journal%20log/2026-08-01-the-finetune-didnt-work.md)) |
+| `cap-accept` confidence scheduling | ❌ loses even fully calibrated | accept parity but −33% tok/s; `run_non_compact` always verifies full width ([writeup](docs/DSPARK-CALIBRATION-FINDINGS.md)) |
+| Native MTP (EAGLE 8-1-9) | ❌ blocked | −6 GB memory deficit **and** `KeyError: 0` in `layers_mapping` (wall 16) |
+| A4Q native-fp4 attention | ❌ not applicable | needs KV width ≥4096; this model has 1024 ([analysis](docs/DRAFT-FINETUNE-PLAN.md)) |
+| mxfp8 KV | ✅ works (1.94×) | superseded by fp4's 3.12× |
+| `--enable-deterministic-inference` | ❌ costs speed, fixes nothing | doesn't cover the kernels that are actually nondeterministic here |
+| `fp8_e4m3` KV | ❌ produces garbage | wall 13 |
+
+**The config in this repo is the settled answer.** The stock RadixArk draft is the recommendation —
+we tried to beat it with a 2M-token finetune and could not.
+
 ### Throughput depends heavily on workload — quote a task class, always
 
 Measured on this stack, stock draft, temp 0, `n=32` per class (harness:
