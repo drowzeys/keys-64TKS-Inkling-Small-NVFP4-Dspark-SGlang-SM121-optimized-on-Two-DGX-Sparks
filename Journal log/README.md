@@ -6,6 +6,7 @@ reasoning included, rather than as a lookup table.
 
 | Date | Post |
 |---|---|
+| 2026-08-01 | [The finetune didn't work — five runs, two learning rates, and the measurement that nearly fooled us](2026-08-01-the-finetune-didnt-work.md) |
 | 2026-08-01 | [Three things we got wrong about measuring Inkling-Small](2026-08-01-three-things-we-got-wrong-measuring-inkling.md) |
 | 2026-08-01 | [We ran a 276B model at 1M context on two desktop DGX Sparks — here's every wall we hit](2026-08-01-build-log-1M-context-on-two-dgx-sparks.md) |
 
