@@ -47,6 +47,18 @@ Committed follow-on campaigns (in order):
    measures worse than static block-7. Tooling for both fits is in `benchmarks/` if a future build
    exposes the dump path.
 
-5. **Draft finetune** — the only remaining lever that raises accept fundamentally (a 0.9B draft
-   predicting a 276B target caps around accept 3.5). Everything else is scheduling.
+5. ~~**Draft finetune**~~ — ❌ **ATTEMPTED AND FAILED. Do not re-run this recipe.**
+   Five runs, two learning rates, three data scales, on 2M tokens harvested from our own target.
+   Measured at 1400 paired anchors: stock **2.828**, LR 5e-5 / 2750 steps **2.698 (−4.6%)**,
+   LR 5e-6 / 600 steps **2.820 (−0.3%)**. At the normal LR we damaged a checkpoint RadixArk fitted
+   on 444K sequences (catastrophic forgetting, monotone with steps); at the gentle LR the damage
+   vanished and **no gain appeared underneath**. Full write-up:
+   [Journal log — the finetune didn't work](../Journal%20log/2026-08-01-the-finetune-didnt-work.md).
+
+   What to try instead, in rough order of promise: (a) change the objective — CE optimises the whole
+   next-token distribution while acceptance only rewards top-1 argmax agreement, and this campaign
+   watched the two diverge (training accuracy and the markov head both improved while accept fell);
+   (b) freeze the backbone and train only the heads; (c) treat ~2.27 pooled as near this draft's
+   ceiling and pursue throughput elsewhere — a larger draft, or the target's own MTP heads if the
+   memory and `layers_mapping` blockers (wall 16) are ever resolved.
 4. **Helion native autotune** (`HELION_AOT_AUTOTUNE=create`) to replace the seeded sm_100 configs.
